@@ -1,0 +1,21 @@
+# =============================================================================
+# ARM64 Cross-Compilation Toolchain (Zynq UltraScale+ / AXI)
+# =============================================================================
+
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+
+# CERN CDK toolchain paths
+set(TOOLCHAIN_ROOT "/acc/sys/cdk/debian/12/aarch64/sysroots/host/usr/bin")
+
+set(CMAKE_C_COMPILER   "${TOOLCHAIN_ROOT}/aarch64-linux-gnu-gcc")
+set(CMAKE_CXX_COMPILER "${TOOLCHAIN_ROOT}/aarch64-linux-gnu-g++")
+
+# Search paths for cross-compilation
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+
+# Platform identifier for our code
+set(FPGA_PLATFORM "ARM_AXI" CACHE STRING "Target platform" FORCE)
