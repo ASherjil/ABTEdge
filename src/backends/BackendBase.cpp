@@ -14,7 +14,7 @@ BackendBase::BackendBase(BackendBase&& other) noexcept
     other.m_baseAddress = nullptr;
     other.m_size = 0;
 }
-BackendBase::BackendBase& operator=(BackendBase&& other) noexcept {
+BackendBase& BackendBase::operator=(BackendBase&& other) noexcept {
 
     if (this != &other) {
         close();// close the connection

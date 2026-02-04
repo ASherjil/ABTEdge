@@ -58,11 +58,21 @@ target_compile_options(fpga_driver_flags INTERFACE
         -Werror=return-type
         -Wconversion
         -Wshadow
-
-        # Performance (always on for low-latency)
-        -march=native
-        -mtune=native
 )
+
+# Architecture-specific flags (can't use -march=native when cross-compiling)
+if(CMAKE_CROSSCOMPILING)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+        # ARM64 cross-compilation: use generic ARMv8-A
+        target_compile_options(fpga_driver_flags INTERFACE -march=armv8-a)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        # x86_64 cross-compilation: use generic x86-64
+        target_compile_options(fpga_driver_flags INTERFACE -march=x86-64 -mtune=generic)
+    endif()
+else()
+    # Native compilation: optimize for the build machine
+    target_compile_options(fpga_driver_flags INTERFACE -march=native -mtune=native)
+endif()
 
 # Release-specific flags
 target_compile_options(fpga_driver_flags INTERFACE
@@ -116,9 +126,9 @@ target_compile_definitions(fpga_common INTERFACE
 # Backend Library (platform-specific hardware access)
 # =============================================================================
 
-add_library(fpga_backend INTERFACE)
+add_library(fpga_backend STATIC)
 
-target_link_libraries(fpga_backend INTERFACE
+target_link_libraries(fpga_backend PUBLIC
         fpga_common
 )
 
@@ -126,41 +136,41 @@ target_link_libraries(fpga_backend INTERFACE
 add_subdirectory(src/backends)
 
 # =============================================================================
-# Executables
+# Executables (uncomment when source files are created)
 # =============================================================================
 
-# --- Test Harness (Phase 1: isolated hardware testing) ---
-add_executable(test_harness
-        src/test_harness/main.cpp
-)
-
-target_link_libraries(test_harness PRIVATE
-        fpga_backend
-        rt          # POSIX shared memory
-        pthread
-)
-
-# --- FPGA Server (Phase 3: production with IPC) ---
-add_executable(fpga_server
-        src/server/main.cpp
-)
-
-target_link_libraries(fpga_server PRIVATE
-        fpga_backend
-        rt
-        pthread
-)
-
-# --- Example Client ---
-add_executable(fpga_client_example
-        src/client/example_client.cpp
-)
-
-target_link_libraries(fpga_client_example PRIVATE
-        fpga_common
-        rt
-        pthread
-)
+# # --- Test Harness (Phase 1: isolated hardware testing) ---
+# add_executable(test_harness
+#         src/test_harness/main.cpp
+# )
+#
+# target_link_libraries(test_harness PRIVATE
+#         fpga_backend
+#         rt          # POSIX shared memory
+#         pthread
+# )
+#
+# # --- FPGA Server (Phase 3: production with IPC) ---
+# add_executable(fpga_server
+#         src/server/main.cpp
+# )
+#
+# target_link_libraries(fpga_server PRIVATE
+#         fpga_backend
+#         rt
+#         pthread
+# )
+#
+# # --- Example Client ---
+# add_executable(fpga_client_example
+#         src/client/example_client.cpp
+# )
+#
+# target_link_libraries(fpga_client_example PRIVATE
+#         fpga_common
+#         rt
+#         pthread
+# )
 
 # =============================================================================
 # Testing (only for native builds)
@@ -179,11 +189,12 @@ endif()
 
 include(GNUInstallDirs)
 
-install(TARGETS test_harness fpga_server fpga_client_example
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+# Install executables (uncomment when they are built)
+# install(TARGETS test_harness fpga_server fpga_client_example
+#         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+# )
 
-install(DIRECTORY src/common src/backends src/client
+install(DIRECTORY src/common src/backends
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fpga_driver
         FILES_MATCHING PATTERN "*.hpp"
 )
@@ -194,9 +205,7 @@ install(DIRECTORY src/common src/backends src/client
 
 message(STATUS "")
 message(STATUS "Targets:")
-message(STATUS "  - test_harness        : Isolated hardware testing")
-message(STATUS "  - fpga_server         : Production server with IPC")
-message(STATUS "  - fpga_client_example : Example client application")
+message(STATUS "  - fpga_backend        : Backend library (STATIC)")
 if(BUILD_TESTING)
     message(STATUS "  - tests               : Unit tests enabled")
 endif()
