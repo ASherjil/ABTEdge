@@ -15,21 +15,22 @@ concept FPGABackend = requires(
     const char* resourceName, // carefull not to use std::uint8_t*
     std::size_t size,
     std::size_t offset,
+    std::size_t physicalAddress,
     std::uint32_t valueToWrite32,
     std::uint64_t valueToWrite64
 )
 {
     // Lifecyle
-    { backend.open(resourceName, size) } -> std::same_as<bool>;
+    { backend.open(resourceName, physicalAddress, size) } -> std::same_as<bool>;
     { backend.close() } -> std::same_as<void>;
 
 	// Read/write of the registers
 	{ constBackend.template registerPtr<std::uint32_t>(offset) } -> std::same_as<volatile std::uint32_t*>;
 	{ constBackend.template registerPtr<std::uint64_t>(offset) } -> std::same_as<volatile std::uint64_t*>;
-	{ constBackend.template readFromField<st::uint32_t{0xff}>(offset) } -> std::same_as<std::uint32_t>;
-	{ constBackend.template readFromField<st::uint64_t{0xff}>(offset) } -> std::same_as<std::uint64_t>;
-	{ backend.template writeToField<std::uint32_t{0xff}>(offset, valuetoWrite32) } -> std::same_as<void>;
-	{ backend.template writeToField<std::uint64_t{0xff}>(offset, valuetoWrite64) } -> std::same_as<void>;
+	{ constBackend.template readFromField<std::uint32_t{0xff}>(offset) } -> std::same_as<std::uint32_t>;
+	{ constBackend.template readFromField<std::uint64_t{0xff}>(offset) } -> std::same_as<std::uint64_t>;
+	{ backend.template writeToField<std::uint32_t{0xff}>(offset, valueToWrite32) } -> std::same_as<void>;
+	{ backend.template writeToField<std::uint64_t{0xff}>(offset, valueToWrite64) } -> std::same_as<void>;
 
     // Status
     { constBackend.isOpen() } -> std::same_as<bool>;

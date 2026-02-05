@@ -5,7 +5,7 @@
 #ifndef ABTEDGE_PCIEBACKEND_H
 #define ABTEDGE_PCIEBACKEND_H
 
-#include "Backend.hpp"
+#include "BackendBase.hpp"
 #include "common/BackendConcept.hpp"
 
 class PCIeBackend : public BackendBase {

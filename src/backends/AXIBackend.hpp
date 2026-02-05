@@ -5,7 +5,7 @@
 #ifndef ABTEDGE_AXIBACKEND_H
 #define ABTEDGE_AXIBACKEND_H
 
-#include "Backend.hpp"
+#include "BackendBase.hpp"
 #include "common/BackendConcept.hpp"
 
 class AXIBackend : public BackendBase {

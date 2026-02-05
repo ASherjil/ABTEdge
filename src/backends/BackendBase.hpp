@@ -19,7 +19,7 @@ public:
     BackendBase& operator=(BackendBase&& other) noexcept;
     ~BackendBase();
 
-    [[nodiscard]] bool open(const char* resource, std::size_t size);
+    [[nodiscard]] bool open(const char* resource, std::size_t physicalAddress, std::size_t size);
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] void* getBaseAddress() const noexcept;
     [[nodiscard]] std::size_t getMmapSize() const noexcept;

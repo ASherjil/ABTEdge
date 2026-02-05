@@ -136,52 +136,32 @@ target_link_libraries(fpga_backend PUBLIC
 add_subdirectory(src/backends)
 
 # =============================================================================
-# Executables (uncomment when source files are created)
+# Executables
 # =============================================================================
 
-# # --- Test Harness (Phase 1: isolated hardware testing) ---
-# add_executable(test_harness
-#         src/test_harness/main.cpp
-# )
-#
-# target_link_libraries(test_harness PRIVATE
-#         fpga_backend
-#         rt          # POSIX shared memory
-#         pthread
-# )
-#
-# # --- FPGA Server (Phase 3: production with IPC) ---
-# add_executable(fpga_server
-#         src/server/main.cpp
-# )
-#
-# target_link_libraries(fpga_server PRIVATE
-#         fpga_backend
-#         rt
-#         pthread
-# )
-#
-# # --- Example Client ---
-# add_executable(fpga_client_example
-#         src/client/example_client.cpp
-# )
-#
-# target_link_libraries(fpga_client_example PRIVATE
-#         fpga_common
-#         rt
-#         pthread
-# )
+# --- Latency Test (measures register write latency via oscilloscope) ---
+add_executable(latency_test
+        src/test/main.cpp
+)
+
+target_include_directories(latency_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test
+)
+
+target_link_libraries(latency_test PRIVATE
+        fpga_backend
+)
 
 # =============================================================================
 # Testing (only for native builds)
 # =============================================================================
 
-option(BUILD_TESTING "Build unit tests" OFF)
+#option(BUILD_TESTING "Build unit tests" OFF)
 
-if(BUILD_TESTING)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
+#if(BUILD_TESTING)
+#    enable_testing()
+#    add_subdirectory(tests)
+#endif()
 
 # =============================================================================
 # Installation
@@ -206,7 +186,5 @@ install(DIRECTORY src/common src/backends
 message(STATUS "")
 message(STATUS "Targets:")
 message(STATUS "  - fpga_backend        : Backend library (STATIC)")
-if(BUILD_TESTING)
-    message(STATUS "  - tests               : Unit tests enabled")
-endif()
+message(STATUS "  - latency_test        : Register write latency test")
 message(STATUS "")
