@@ -51,7 +51,7 @@ public:
 
         if (!m_axiHandler.open("/dev/mem", DUMMY_PHYSICAL_ADDRESS, 0x1000 /*4KB is enough*/)) {
             std::perror("Failed to open /dev/mem");
-            return; 
+            return;
         }
         m_connectionResult = true; //connection succeeded
     }

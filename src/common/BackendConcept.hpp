@@ -11,7 +11,7 @@
 template<typename T>
 concept FPGABackend = requires(
     T backend,
-    const T constBackend,
+    const T CONST_BACKEND,
     const char* resourceName, // carefull not to use std::uint8_t*
     std::size_t size,
     std::size_t offset,
@@ -25,17 +25,17 @@ concept FPGABackend = requires(
     { backend.close() } -> std::same_as<void>;
 
 	// Read/write of the registers
-	{ constBackend.template registerPtr<std::uint32_t>(offset) } -> std::same_as<volatile std::uint32_t*>;
-	{ constBackend.template registerPtr<std::uint64_t>(offset) } -> std::same_as<volatile std::uint64_t*>;
-	{ constBackend.template readFromField<std::uint32_t{0xff}>(offset) } -> std::same_as<std::uint32_t>;
-	{ constBackend.template readFromField<std::uint64_t{0xff}>(offset) } -> std::same_as<std::uint64_t>;
+	{ CONST_BACKEND.template registerPtr<std::uint32_t>(offset) } -> std::same_as<volatile std::uint32_t*>;
+	{ CONST_BACKEND.template registerPtr<std::uint64_t>(offset) } -> std::same_as<volatile std::uint64_t*>;
+	{ CONST_BACKEND.template readFromField<std::uint32_t{0xff}>(offset) } -> std::same_as<std::uint32_t>;
+	{ CONST_BACKEND.template readFromField<std::uint64_t{0xff}>(offset) } -> std::same_as<std::uint64_t>;
 	{ backend.template writeToField<std::uint32_t{0xff}>(offset, valueToWrite32) } -> std::same_as<void>;
 	{ backend.template writeToField<std::uint64_t{0xff}>(offset, valueToWrite64) } -> std::same_as<void>;
 
     // Status
-    { constBackend.isOpen() } -> std::same_as<bool>;
-    { constBackend.getBaseAddress() } -> std::same_as<void*>;
-    { constBackend.getMmapSize() } -> std::same_as<std::size_t>;
+    { CONST_BACKEND.isOpen() } -> std::same_as<bool>;
+    { CONST_BACKEND.getBaseAddress() } -> std::same_as<void*>;
+    { CONST_BACKEND.getMmapSize() } -> std::same_as<std::size_t>;
 };
 
 #endif //ABTEDGE_BACKENDCONCEPT_HPP
