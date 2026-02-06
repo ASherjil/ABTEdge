@@ -38,6 +38,10 @@ PCIeBackend::PCIeBackend(std::uint16_t vendorID, std::uint16_t deviceID, int bar
         std::uint64_t start{}, end{};
         sscanf(line.c_str(), "%lx %lx", &start, &end);
         m_barSize = end - start + 1;
+
+        std::fprintf(stderr, "DEBUG: path=%s start=0x%lX end=0x%lX size=%zu\n",
+             m_pcieResourcePath.c_str(), start, end, m_barSize);
+
         break; // stop here we found our match
     }
 
