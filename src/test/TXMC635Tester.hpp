@@ -91,29 +91,30 @@ public:
             return;
         }
 
-        std::printf("\n=== CPLD Register Dump ===\n");
-        std::printf("  int_enable:    0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_INT_ENABLE_OFFSET));
-        std::printf("  int_status:    0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_INT_STATUS_OFFSET));
-        std::printf("  conf_control:  0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_CONF_CONTROL_OFFSET));
-        std::printf("  conf_data:     0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_CONF_DATA_OFFSET));
-        std::printf("  isp_status:    0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_ISP_STATUS_OFFSET));
-        std::printf("  io_pull_cfg:   0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_IO_PULL_CFG_OFFSET));
-        std::printf("  serial_number: 0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_SERIAL_NUMBER_OFFSET));
-        std::printf("  code_version:  0x%08X\n", *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_CODE_VERSION_OFFSET));
-
-        constexpr int numReads = 3;
+        constexpr int numReads = 8;
 
         auto t0 = std::chrono::steady_clock::now();
-        volatile std::uint32_t r0 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_SERIAL_NUMBER_OFFSET);
-        volatile std::uint32_t r1 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_CODE_VERSION_OFFSET);
-        volatile std::uint32_t r2 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_IO_PULL_CFG_OFFSET);
+        std::uint32_t v0 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_INT_ENABLE_OFFSET);
+        std::uint32_t v1 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_INT_STATUS_OFFSET);
+        std::uint32_t v2 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_CONF_CONTROL_OFFSET);
+        std::uint32_t v3 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_CONF_DATA_OFFSET);
+        std::uint32_t v4 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_ISP_STATUS_OFFSET);
+        std::uint32_t v5 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_IO_PULL_CFG_OFFSET);
+        std::uint32_t v6 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_SERIAL_NUMBER_OFFSET);
+        std::uint32_t v7 = *m_cpldHandler.registerPtr<std::uint32_t>(CPLD_CODE_VERSION_OFFSET);
         auto t1 = std::chrono::steady_clock::now();
-
-        (void)r0; (void)r1; (void)r2;
 
         auto totalNs = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
 
-        std::printf("\n=== CPLD Latency (pure PCIe, no SPI) ===\n");
+        std::printf("\n=== CPLD Register Dump (pure PCIe, no SPI) ===\n");
+        std::printf("  int_enable:    0x%08X\n", v0);
+        std::printf("  int_status:    0x%08X\n", v1);
+        std::printf("  conf_control:  0x%08X\n", v2);
+        std::printf("  conf_data:     0x%08X\n", v3);
+        std::printf("  isp_status:    0x%08X\n", v4);
+        std::printf("  io_pull_cfg:   0x%08X\n", v5);
+        std::printf("  serial_number: 0x%08X\n", v6);
+        std::printf("  code_version:  0x%08X\n", v7);
         std::printf("  %ld ns total / %d reads = %ld ns avg\n\n", totalNs, numReads, totalNs / numReads);
     }
 
@@ -138,14 +139,23 @@ public:
 
         *m_fpgaHandler.registerPtr<std::uint32_t>(dac1Offset) = DAC_COARSE_GAIN;
 
-        auto dacStart = std::chrono::steady_clock::now();
+        // Timed DAC write
+        auto dacWriteStart = std::chrono::steady_clock::now();
         *m_fpgaHandler.registerPtr<std::uint32_t>(dac1Offset) = DAC_WRITE_CMD | static_cast<std::uint16_t>(dacVal);
-        auto dacEnd = std::chrono::steady_clock::now();
+        auto dacWriteEnd = std::chrono::steady_clock::now();
 
-        std::printf("\n=== DAC Write ===\n");
-        std::printf("  DAC_1: %.2f V (raw=0x%04X) | %ld ns\n",
-                    targetVolts, static_cast<std::uint16_t>(dacVal),
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(dacEnd - dacStart).count());
+        // Timed DAC readback (verify what was written)
+        auto dacReadStart = std::chrono::steady_clock::now();
+        std::uint32_t dacReadback = *m_fpgaHandler.registerPtr<std::uint32_t>(dac1Offset);
+        auto dacReadEnd = std::chrono::steady_clock::now();
+
+        auto writeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(dacWriteEnd - dacWriteStart).count();
+        auto readNs  = std::chrono::duration_cast<std::chrono::nanoseconds>(dacReadEnd - dacReadStart).count();
+
+        std::printf("\n=== DAC Write + Readback ===\n");
+        std::printf("  DAC_1 write: %.2f V (raw=0x%04X) | %ld ns\n",
+                    targetVolts, static_cast<std::uint16_t>(dacVal), writeNs);
+        std::printf("  DAC_1 read:  0x%08X | %ld ns\n", dacReadback, readNs);
 
         // Wait for DAC to settle
         std::this_thread::sleep_for(std::chrono::microseconds(100));
