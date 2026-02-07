@@ -6,7 +6,10 @@
 
 #include <string>
 #include <fstream>     // std::ifstream
-#include <cstdio>      // sscanf
+#include <cstdio>      // sscanf, std::printf
+#include <sys/mman.h>  // mmap, MAP_HUGETLB, etc.
+#include <fcntl.h>     // ::open, O_RDWR, O_SYNC
+#include <unistd.h>    // ::close
 
 namespace fs = std::filesystem;
 

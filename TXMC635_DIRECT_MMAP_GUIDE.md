@@ -213,33 +213,103 @@ uint16_t adc2_ch5 = demux[2*8 + 5] & 0xFFFF;  // ADC2, channel 5
 
 ---
 
-## 6. Carrier Board Registers (txmc_conf — 0x1498:0x927b, BAR0)
+## 6. Carrier Board Registers (txmc_conf — MachXO2 CPLD)
 
-| Index | Offset | Register | Safe to Read |
-|-------|--------|----------|-------------|
-| 0 | 0x00 | int_enable | Yes |
-| 1 | 0x04 | int_status | Yes |
-| 2 | 0x08 | conf_control | Yes |
-| 3 | 0x0C | conf_data | Yes |
-| 4 | 0x10 | isp_control | **NO — ISP, do not touch** |
-| 5 | 0x14 | isp_config | **NO — ISP, do not touch** |
-| 6 | 0x18 | isp_command | **NO — ISP, do not touch** |
-| 7 | 0x1C | isp_status | Yes |
-| 8 | 0x20 | io_pull_config | Yes |
-| 9 | 0x24 | **serial_number** | Yes |
-| 10 | 0x28 | **code_version** | Yes |
+| Property | Value |
+|----------|-------|
+| Vendor:Device | `0x1498:0x927b` |
+| Driver | `txmc_conf` v0.2.0 |
+| BAR0 | 256 bytes (config registers) |
+| BAR1 | 256 bytes (ISP data — **do not touch**) |
+| Headers | `/acc/local/deb12x64/drv/edge/modules/txmc_conf/0.2.0/include/txmc_conf/` |
 
-BAR1 = ISP data space (256B) — do not touch.
+### Register Map (BAR0, 11 × 32-bit registers)
+
+**WARNING**: Offsets are NOT contiguous — extracted from Edge driver hw_desc binary.
+
+| ID | hw_offset | Register | R/W | Safe | Description |
+|----|-----------|----------|-----|------|-------------|
+| 0 | **0xC0** | `int_enable` | RW | Yes | Interrupt enable |
+| 1 | **0xC4** | `int_status` | RW | Yes | Interrupt status |
+| 2 | **0xD0** | `conf_control` | RW | Yes | Config control/status |
+| 3 | **0xD4** | `conf_data` | RW | Yes | Config data |
+| 4 | **0xE0** | `isp_control` | RW | **NO** | ISP control — can brick CPLD |
+| 5 | **0xE4** | `isp_config` | RW | **NO** | ISP config — can brick CPLD |
+| 6 | **0xE8** | `isp_command` | RW | **NO** | ISP command — can brick CPLD |
+| 7 | **0xEC** | `isp_status` | RO | Yes | ISP status |
+| 8 | **0xF4** | `io_pull_config` | RW | Yes | IO pull resistor config |
+| 9 | **0xF8** | `serial_number` | RO | Yes | Board serial number |
+| 10 | **0xFC** | `code_version` | RO | Yes | MachXO2 firmware version |
 
 ```cpp
 auto cpld = pcie_map(0x1498, 0x927b, 0);
-printf("Serial:  0x%08X\n", cpld.ptr[9]);   // Good first mmap test
-printf("Version: 0x%08X\n", cpld.ptr[10]);
+auto* regs = reinterpret_cast<volatile uint32_t*>(
+    reinterpret_cast<volatile uint8_t*>(cpld.ptr) + 0xC0);
+printf("Serial:  0x%08X\n", cpld.ptr[0xF8 / 4]);  // hw_offset 0xF8
+printf("Version: 0x%08X\n", cpld.ptr[0xFC / 4]);   // hw_offset 0xFC
 ```
 
 ---
 
-## 7. Voltage Conversion
+## 7. Latency Analysis & Diagnostics
+
+### Where does read latency come from?
+
+The FPGA ADC core runs a **continuous autonomous sampling loop** (VHDL FSM):
+
+```
+CNV pulse → ADAS3022 converts (~700ns) → SPI readout 33 bits @ ~25MHz (~1.3µs)
+→ store in buffer register → next channel → repeat all 8 channels
+```
+
+**CPU reads do NOT trigger SPI transactions.** Reads return buffered values via a
+combinatorial AXI-Lite mux (~5ns FPGA-internal). The ~3µs read latency is
+**100% PCIe round-trip** through the Pericom PI7C9X2G404 switch.
+
+### Proving it: CPLD vs FPGA read latency
+
+Both devices sit behind the same PCIe switch. If CPLD register reads (simple
+static registers, no SPI) show the same ~3µs latency, the bottleneck is PCIe.
+
+```cpp
+// Read CPLD serial_number (static register, no SPI, no state machine)
+auto cpld = pcie_map(0x1498, 0x927b, 0);
+auto t0 = steady_clock::now();
+volatile uint32_t serial = cpld.ptr[0xF8 / 4];  // hw_offset 0xF8
+auto t1 = steady_clock::now();
+printf("CPLD read: %ld ns\n", duration_cast<nanoseconds>(t1-t0).count());
+
+// Read FPGA ADC channel (buffered register behind SPI FSM)
+auto fpga = pcie_map(0xBAD7, 0x7469, 0);
+auto t2 = steady_clock::now();
+volatile uint32_t adc = fpga.ptr[2 * 0x400]; // core 2, ch 0
+auto t3 = steady_clock::now();
+printf("FPGA read: %ld ns\n", duration_cast<nanoseconds>(t3-t2).count());
+
+// If both ~3µs → PCIe is the bottleneck, not ADC/SPI/VHDL
+```
+
+### Latency budget
+
+| Component | Latency | Notes |
+|-----------|---------|-------|
+| PCIe TLP round-trip | **~3 µs** | Through switch, UC memory |
+| AXI-Lite register read | ~5 ns | Combinatorial mux in FPGA |
+| SPI transaction | ~1.3 µs | 33 bits @ 25 MHz (NOT on read path) |
+| ADC conversion (ADAS3022) | ~700 ns | CNV→BUSY deassert (NOT on read path) |
+| Full 8-ch sampling cycle | ~18 ms | All 8 channels sequentially |
+| **Data staleness** | **0–18 ms** | Time since last buffer update |
+| Edge driver overhead | ~1-4 µs | Kernel transition + locking |
+
+**Conclusion**: Software optimization beyond eliminating Edge overhead (~1µs saved)
+yields diminishing returns. The PCIe physical layer is the floor at ~3µs per read.
+For sub-µs reads, the FPGA would need DMA (push to host RAM) instead of
+CPU-initiated MMIO (pull from device).
+
+---
+
+## 8. Voltage Conversion
+
 
 ### ADC: ADAS3022 (16-bit signed two's complement, ±10.24V with 0x8CCF config)
 
@@ -285,7 +355,7 @@ int16_t volts_to_dac(double v) {
 
 ---
 
-## 8. Minimal mmap Example
+## 9. Minimal mmap Example
 
 ```cpp
 int main() {
@@ -322,7 +392,7 @@ int main() {
 
 ---
 
-## 9. Device Discovery & mmap (C++20)
+## 10. Device Discovery & mmap (C++20)
 
 PCI slot addresses change between boots. Scan `/sys/bus/pci/devices/` by vendor:device ID.
 Each device directory contains: `vendor`, `device` (hex text files), `resource` (BAR listing),
@@ -384,7 +454,7 @@ auto cpld = pcie_map(0x1498, 0x927b, 0);   // BAR0 = 256B regs
 
 ---
 
-## 10. Quick Reference
+## 11. Quick Reference
 
 | Operation | Code |
 |-----------|------|
@@ -399,7 +469,7 @@ auto cpld = pcie_map(0x1498, 0x927b, 0);   // BAR0 = 256B regs
 
 ---
 
-## 11. Loopback Test (DAC→ADC)
+## 12. Loopback Test (DAC→ADC)
 
 ```cpp
 // Connect DAC ch0 output to ADC ch0 input physically

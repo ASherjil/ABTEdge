@@ -19,7 +19,8 @@ int main() {
 #endif
 
 #ifdef FPGA_PLATFORM_X86_PCIE
-    TXMC635Tester txmc635Tester(VENDOR_ID, DEVICE_ID, BAR_NUMBER);
+    TXMC635Tester txmc635Tester;
+    txmc635Tester.performCPLDLatencyTest();
     txmc635Tester.performADCAcquisition();
 #endif
 
