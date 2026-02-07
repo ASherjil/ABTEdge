@@ -7,11 +7,24 @@
 #include <cstdio>
 #include <chrono>
 #include <thread>
+#include <sched.h>      // sched_setscheduler, SCHED_FIFO
+#include <sys/mman.h>   // mlockall
 
 using namespace fpga::regs::dummy_hw_desc;
 using namespace std::chrono_literals;
 
 int main() {
+    // Lock all current and future pages in RAM — prevents page faults
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+        std::fprintf(stderr, "WARNING: mlockall failed (run as root)\n");
+    }
+
+    // Set real-time scheduling — prevents kernel preemption during measurements
+    struct sched_param sp{.sched_priority = 99};
+    if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0) {
+        std::fprintf(stderr, "WARNING: SCHED_FIFO failed (run as root)\n");
+    }
+
 #ifdef FPGA_PLATFORM_ARM_AXI
     AXIBusTester diotTester;
     diotTester.performReadWriteTest();

@@ -59,78 +59,73 @@ public:
     void performReadWriteTest() {
         using namespace fpga::regs::dummy_hw_desc;
         if (!m_connectionResult) {
-            std::printf("Connection result failure cannot perform any tests");
+            std::printf("Connection failed, skipping test\n");
             return;
         }
-        // Read all registers and print their values
-        std::printf("=== Reading All Registers ===\n\n");
 
-        // READ_ONLY_REG (0x0) - RO
-        auto readOnly = *m_axiHandler.registerPtr<std::uint32_t>(READ_ONLY_REG);
-        std::printf("READ_ONLY_REG  (0x%02zX): 0x%08X\n", READ_ONLY_REG, readOnly);
+        // Timed reads of all safe registers
+        constexpr int numReads = 6;
 
-        // READ_WRITE_REG (0x4) - RW
-        auto readWrite = *m_axiHandler.registerPtr<std::uint32_t>(READ_WRITE_REG);
-        std::printf("READ_WRITE_REG (0x%02zX): 0x%08X\n", READ_WRITE_REG, readWrite);
+        auto t0 = std::chrono::steady_clock::now();
+        std::uint32_t v0 = *m_axiHandler.registerPtr<std::uint32_t>(READ_ONLY_REG);
+        std::uint32_t v1 = *m_axiHandler.registerPtr<std::uint32_t>(READ_WRITE_REG);
+        std::uint32_t v2 = *m_axiHandler.registerPtr<std::uint32_t>(MEAS_JITTER);
+        std::uint32_t v3 = *m_axiHandler.registerPtr<std::uint32_t>(PLAY_GROUND);
+        std::uint32_t v4 = *m_axiHandler.registerPtr<std::uint32_t>(PG_3);
+        std::uint32_t v5 = *m_axiHandler.registerPtr<std::uint32_t>(PG_4);
+        auto t1 = std::chrono::steady_clock::now();
 
-        // MEAS_JITTER (0x8) - RW
-        auto measJitter = *m_axiHandler.registerPtr<std::uint32_t>(MEAS_JITTER);
-        std::printf("MEAS_JITTER    (0x%02zX): 0x%08X\n", MEAS_JITTER, measJitter);
+        auto totalNs = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
 
-        // PLAY_GROUND (0xc) - RO
-        auto playGround = *m_axiHandler.registerPtr<std::uint32_t>(PLAY_GROUND);
-        std::printf("PLAY_GROUND    (0x%02zX): 0x%08X\n", PLAY_GROUND, playGround);
+        std::printf("\n=== AXI Register Dump ===\n");
+        std::printf("  READ_ONLY_REG:  0x%08X\n", v0);
+        std::printf("  READ_WRITE_REG: 0x%08X\n", v1);
+        std::printf("  MEAS_JITTER:    0x%08X\n", v2);
+        std::printf("  PLAY_GROUND:    0x%08X\n", v3);
+        std::printf("  PG_3:           0x%08X\n", v4);
+        std::printf("  PG_4:           0x%08X\n", v5);
+        std::printf("  %ld ns total / %d reads = %ld ns avg\n", totalNs, numReads, totalNs / numReads);
 
-        // PG_3 (0x18) - RW
-        auto pg3 = *m_axiHandler.registerPtr<std::uint8_t>(PG_3);
-        std::printf("PG_3           (0x%02zX): 0x%02X\n", PG_3, pg3);
-
-        // PG_4 (0x1c) - RW
-        auto pg4 = *m_axiHandler.registerPtr<std::uint8_t>(PG_4);
-        std::printf("PG_4           (0x%02zX): 0x%02X\n", PG_4, pg4);
-
-        // Test write then read back
-        std::printf("\n=== Write/Read Test ===\n\n");
-
+        // Timed write + readback
         std::uint32_t testVal = 0xCEEDBEEF;
-        std::printf("Writing 0x%08X to READ_WRITE_REG...\n", testVal);
+
+        auto writeStart = std::chrono::steady_clock::now();
         *m_axiHandler.registerPtr<std::uint32_t>(READ_WRITE_REG) = testVal;
+        auto writeEnd = std::chrono::steady_clock::now();
 
-        auto readBack = *m_axiHandler.registerPtr<std::uint32_t>(READ_WRITE_REG);
-        std::printf("Read back: 0x%08X\n", readBack);
+        auto readStart = std::chrono::steady_clock::now();
+        std::uint32_t readBack = *m_axiHandler.registerPtr<std::uint32_t>(READ_WRITE_REG);
+        auto readEnd = std::chrono::steady_clock::now();
 
-        if (readBack == testVal) {
-            std::printf("SUCCESS: Write/read test passed!\n");
-        } else {
-            std::printf("FAILED: Expected 0x%08X, got 0x%08X\n", testVal, readBack);
-        }
+        auto writeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(writeEnd - writeStart).count();
+        auto readNs  = std::chrono::duration_cast<std::chrono::nanoseconds>(readEnd - readStart).count();
 
-        // Dump first 32 bytes as raw hex
-        std::printf("\n=== Raw Memory Dump (first 32 bytes) ===\n");
-        auto* base = m_axiHandler.registerPtr<std::uint32_t>(0);
-        for (int i = 0; i < 8; ++i) {
-            std::printf("  [0x%02X]: 0x%08X\n", i * 4, base[i]);
-        }
+        std::printf("\n=== AXI Write + Readback ===\n");
+        std::printf("  Write 0x%08X | %ld ns\n", testVal, writeNs);
+        std::printf("  Read  0x%08X | %ld ns | %s\n", readBack, readNs,
+                    readBack == testVal ? "PASS" : "FAIL");
     }
 
     void generateSquarePulse() {
         using namespace fpga::regs::dummy_hw_desc;
         using namespace std::chrono_literals;
         if (!m_connectionResult) {
-            std::printf("Connection result failure cannot perform any tests");
+            std::printf("Connection failed, skipping test\n");
             return;
         }
-        // Square pulse test for oscilloscope
+
         std::printf("\n=== Square Pulse Test (Ctrl+C to stop) ===\n");
-        std::printf("Writing 1->0 to MEAS_JITTER every 1 second...\n");
-        std::printf("Pulse width = write-to-write latency\n\n");
+        std::printf("Writing 1->0 to MEAS_JITTER every 1 second\n\n");
 
         auto* jitterReg = m_axiHandler.registerPtr<std::uint32_t>(MEAS_JITTER);
         while (true) {
+            auto t0 = std::chrono::steady_clock::now();
             *jitterReg = 1;
             *jitterReg = 0;
+            auto t1 = std::chrono::steady_clock::now();
 
-            std::printf("Pulse sent!\n");
+            auto pulseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+            std::printf("Pulse sent | 2 writes: %ld ns\n", pulseNs);
             std::this_thread::sleep_for(1000ms);
         }
     }
