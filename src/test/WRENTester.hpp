@@ -160,7 +160,30 @@ public:
                     goto done;
                 }
 
-                if (typ == TYP_EVENT) {
+                if (typ == TYP_EVENT && (shadowOff + 3) <= RING_MASK) {
+                    // Fast path: no ring wrap, use 64-bit reads (2 PCIe round-trips instead of 3)
+                    auto tParse = std::chrono::steady_clock::now();
+
+                    // 64-bit read: word 1 (ids) + word 2 (nsec) in one PCIe transaction
+                    std::uint64_t idsAndNsec = *m_pcieHandler.registerPtr<std::uint64_t>(
+                        WREN_ASYNC_DATA_BASE + ((shadowOff + 1) & RING_MASK) * 4);
+                    // 32-bit read: word 3 (sec)
+                    std::uint32_t sec = readRingWord((shadowOff + 3) & RING_MASK);
+
+                    auto parseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - tParse).count();
+                    totalParseNs += parseNs;
+
+                    // Little-endian: low 32 bits = word at lower address (ids), high 32 bits = word at higher address (nsec)
+                    auto ids  = static_cast<std::uint32_t>(idsAndNsec);
+                    auto nsec = static_cast<std::uint32_t>(idsAndNsec >> 32);
+                    std::uint16_t evId   = ids & EVT_ID_MASK;
+                    std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
+
+                    std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 64-bit]\n",
+                                ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
+                } else if (typ == TYP_EVENT) {
+                    // Slow path: capsule wraps around ring boundary, fall back to 32-bit reads
                     auto tParse = std::chrono::steady_clock::now();
 
                     std::uint32_t ids  = readRingWord((shadowOff + 1) & RING_MASK);
@@ -174,7 +197,7 @@ public:
                     std::uint16_t evId   = ids & EVT_ID_MASK;
                     std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
 
-                    std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns]\n",
+                    std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 32-bit]\n",
                                 ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
                 }
 
@@ -190,7 +213,7 @@ public:
         if (pollCount > 0)
             std::printf("  Avg poll read:      %ld ns\n", totalPollNs / pollCount);
         if (eventsFound > 0)
-            std::printf("  Avg event parse:    %ld ns (3 PCIe reads: ids + nsec + sec)\n",
+            std::printf("  Avg event parse:    %ld ns (1x 64-bit read + 1x 32-bit read)\n",
                         totalParseNs / eventsFound);
         std::printf("\n");
     }
