@@ -246,6 +246,148 @@ public:
         std::printf("\n");
     }
 
+    // Catch PIX.AMCLO-CT (ev_id=142) then wait for LTIM comp_idx=1 pulse (50ms delay).
+    // Measures: timestamp jitter (predicted vs actual) and PCIe read latency to userspace.
+    void measureLtimPulseJitter(int durationSeconds = 30) {
+        if (!m_connected) {
+            std::printf("WREN connection failed, skipping test\n");
+            return;
+        }
+
+        constexpr std::uint32_t HDR_TYP_MASK  = 0x000000FF;
+        constexpr std::uint32_t HDR_LEN_MASK  = 0xFFFF0000;
+        constexpr unsigned      HDR_LEN_SHIFT = 16;
+        constexpr std::uint8_t  TYP_EVENT     = 0x02;
+        constexpr std::uint8_t  TYP_PULSE     = 0x04;
+        constexpr std::uint32_t EVT_ID_MASK   = 0x0000FFFF;
+        constexpr std::uint16_t AMCLO_EV_ID   = 142;
+        constexpr std::uint32_t RING_MASK     = 2047;
+        constexpr std::uint32_t TARGET_COMP   = 1;       // comp_idx for WRLTIM_0-23_EC
+        constexpr std::uint64_t LTIM23_DELAY_NS = 50'000'000ULL; // 50ms
+
+        std::printf("\n=== LTIM Pulse Jitter Test (WRLTIM_0-23_EC, comp=%u) ===\n", TARGET_COMP);
+        std::printf("  CTIM: PIX.AMCLO-CT (ev_id=142)  |  LTIM: 1kHz, 50ms delay\n");
+        std::printf("  Watchdog: %ds\n\n", durationSeconds);
+
+        std::uint32_t shadowOff = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ASYNC_BOARD_OFF);
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(durationSeconds);
+
+        struct Prediction {
+            std::uint64_t predicted_tai_ns;
+            bool active;
+        };
+        constexpr int MAX_PENDING = 16;
+        Prediction pending[MAX_PENDING] = {};
+        int pendingIdx = 0;
+
+        int ctimCount = 0, pulseTotal = 0, matchCount = 0;
+        std::int64_t jitterSum = 0, jitterMin = INT64_MAX, jitterMax = INT64_MIN;
+        long parseNsSum = 0, parseNsMin = LONG_MAX, parseNsMax = 0;
+
+        while (std::chrono::steady_clock::now() < deadline) {
+            std::uint32_t boardOff = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ASYNC_BOARD_OFF);
+            if (boardOff == shadowOff)
+                continue;
+
+            while (shadowOff != boardOff) {
+                bool noWrap = (shadowOff + 3) <= RING_MASK;
+
+                if (noWrap) {
+                    auto tRead = std::chrono::steady_clock::now();
+
+                    // 64-bit read #1: header (word 0) + word 1
+                    std::uint64_t hdrAndW1 = *m_pcieHandler.registerPtr<std::uint64_t>(
+                        WREN_ASYNC_DATA_BASE + shadowOff * 4);
+                    auto hdr = static_cast<std::uint32_t>(hdrAndW1);
+                    auto w1  = static_cast<std::uint32_t>(hdrAndW1 >> 32);
+                    std::uint8_t  typ = hdr & HDR_TYP_MASK;
+                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
+
+                    if (len == 0 || len > 2048) {
+                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u\n", len, shadowOff);
+                        goto ltim_done;
+                    }
+
+                    if (typ == TYP_EVENT) {
+                        std::uint16_t evId = w1 & EVT_ID_MASK;
+                        if (evId == AMCLO_EV_ID) {
+                            std::uint64_t w2w3 = *m_pcieHandler.registerPtr<std::uint64_t>(
+                                WREN_ASYNC_DATA_BASE + (shadowOff + 2) * 4);
+                            auto nsec = static_cast<std::uint32_t>(w2w3);
+                            auto sec  = static_cast<std::uint32_t>(w2w3 >> 32);
+
+                            std::uint64_t pred_tai_ns =
+                                static_cast<std::uint64_t>(sec) * 1'000'000'000ULL + nsec + LTIM23_DELAY_NS;
+
+                            int idx = pendingIdx++ % MAX_PENDING;
+                            pending[idx] = {pred_tai_ns, true};
+                            ++ctimCount;
+
+                            std::printf("  CTIM #%-3d  due=%u.%09u\n", ctimCount, sec, nsec);
+                        }
+                    } else if (typ == TYP_PULSE && w1 == TARGET_COMP) {
+                        // 64-bit read #2: timestamp (only for our target LTIM)
+                        std::uint64_t w2w3 = *m_pcieHandler.registerPtr<std::uint64_t>(
+                            WREN_ASYNC_DATA_BASE + (shadowOff + 2) * 4);
+
+                        auto readNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - tRead).count();
+
+                        auto pulse_sec  = static_cast<std::uint32_t>(w2w3);
+                        auto pulse_nsec = static_cast<std::uint32_t>(w2w3 >> 32);
+                        ++pulseTotal;
+
+                        std::uint64_t pulse_tai_ns =
+                            static_cast<std::uint64_t>(pulse_sec) * 1'000'000'000ULL + pulse_nsec;
+
+                        // Match against pending CTIM predictions (±5ms window)
+                        for (int i = 0; i < MAX_PENDING; ++i) {
+                            if (!pending[i].active) continue;
+                            auto jitter = static_cast<std::int64_t>(pulse_tai_ns - pending[i].predicted_tai_ns);
+                            if (jitter > -5'000'000 && jitter < 5'000'000) {
+                                pending[i].active = false;
+                                ++matchCount;
+                                std::int64_t absJ = (jitter < 0) ? -jitter : jitter;
+                                jitterSum += absJ;
+                                if (jitter < jitterMin) jitterMin = jitter;
+                                if (jitter > jitterMax) jitterMax = jitter;
+                                parseNsSum += readNs;
+                                if (readNs < parseNsMin) parseNsMin = readNs;
+                                if (readNs > parseNsMax) parseNsMax = readNs;
+
+                                std::printf("  PULSE #%-3d  fired=%u.%09u  jitter=%+ld ns  read=%ld ns\n",
+                                            matchCount, pulse_sec, pulse_nsec, jitter, readNs);
+                                break;
+                            }
+                        }
+                    }
+
+                    shadowOff = (shadowOff + len) & RING_MASK;
+                } else {
+                    std::uint32_t hdr = readRingWord(shadowOff);
+                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
+                    if (len == 0 || len > 2048) {
+                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u\n", len, shadowOff);
+                        goto ltim_done;
+                    }
+                    shadowOff = (shadowOff + len) & RING_MASK;
+                }
+            }
+        }
+
+    ltim_done:
+        std::printf("\n  --- Summary ---\n");
+        std::printf("  CTIMs caught:     %d\n", ctimCount);
+        std::printf("  LTIM-1 pulses:    %d  (matched: %d)\n", pulseTotal, matchCount);
+        if (matchCount > 0) {
+            std::printf("  Jitter:  min=%+ld  max=%+ld  avg=%ld ns (abs)\n",
+                        jitterMin, jitterMax, jitterSum / matchCount);
+            std::printf("  PCIe read (2x64-bit parse):  min=%ld  max=%ld  avg=%ld ns\n",
+                        parseNsMin, parseNsMax, parseNsSum / matchCount);
+        }
+        std::printf("\n");
+    }
+
 private:
     // Read a single 32-bit word from the async ring buffer at the given word index
     [[nodiscard]]

@@ -40,7 +40,8 @@ int main() {
 */
     WRENTester wrenTester;
     wrenTester.performHostRegisterDump();
-    wrenTester.pollTimingEvents(30);
+    //wrenTester.pollTimingEvents(30);
+    wrenTester.measureLtimPulseJitter(30);
 #endif
 
     return 0;
