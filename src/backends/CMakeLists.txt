@@ -5,6 +5,7 @@
 target_sources(fpga_backend PRIVATE
     BackendBase.cpp
     PCIeBackend.cpp
+    ../x86_64Tuner.cpp
 )
 
 target_include_directories(fpga_backend PUBLIC
