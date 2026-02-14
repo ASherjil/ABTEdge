@@ -51,30 +51,39 @@ public:
     }
 
     // Bulk read all safe host registers with timing
+    // Uses 64-bit reads to pair adjacent registers (7 PCIe round-trips instead of 12)
     void performHostRegisterDump() {
         if (!m_connected) {
             std::printf("WREN connection failed, skipping test\n");
             return;
         }
 
-        constexpr int NUM_READS = 12;
+        constexpr int NUM_TRANSACTIONS = 7; // 5x 64-bit + 2x 32-bit
 
         auto t0 = std::chrono::steady_clock::now();
-        std::uint32_t ident      = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_IDENT);
-        std::uint32_t mapVersion = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_MAP_VERSION);
-        std::uint32_t modelId    = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_MODEL_ID);
-        std::uint32_t fwVersion  = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_FW_VERSION);
-        std::uint32_t wrState    = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_WR_STATE);
-        std::uint32_t taiLo      = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_TM_TAI_LO);
-        std::uint32_t taiHi      = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_TM_TAI_HI);
-        std::uint32_t cycles     = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_TM_CYCLES);
-        std::uint32_t compact    = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_TM_COMPACT);
-        std::uint32_t isr        = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ISR);
-        std::uint32_t isrRaw     = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ISR_RAW);
-        std::uint32_t imr        = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_IMR);
+        // 64-bit reads: pair adjacent registers into single PCIe transactions
+        std::uint64_t identAndMap   = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_IDENT);       // 0x00+0x04
+        std::uint64_t modelAndFw    = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_MODEL_ID);    // 0x08+0x0C
+        std::uint64_t stateAndTaiLo = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_WR_STATE);    // 0x10+0x14
+        std::uint64_t taiHiAndCyc   = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_TM_TAI_HI);  // 0x18+0x1C
+        std::uint32_t compact       = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_TM_COMPACT);  // 0x20 (gap to 0x28)
+        std::uint64_t isrAndRaw     = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_ISR);         // 0x28+0x2C
+        std::uint32_t imr           = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_IMR);         // 0x30
         auto t1 = std::chrono::steady_clock::now();
 
         auto totalNs = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+
+        // Little-endian: low 32 bits = lower address, high 32 bits = higher address
+        auto ident      = static_cast<std::uint32_t>(identAndMap);
+        auto mapVersion = static_cast<std::uint32_t>(identAndMap >> 32);
+        auto modelId    = static_cast<std::uint32_t>(modelAndFw);
+        auto fwVersion  = static_cast<std::uint32_t>(modelAndFw >> 32);
+        auto wrState    = static_cast<std::uint32_t>(stateAndTaiLo);
+        auto taiLo      = static_cast<std::uint32_t>(stateAndTaiLo >> 32);
+        auto taiHi      = static_cast<std::uint32_t>(taiHiAndCyc);
+        auto cycles     = static_cast<std::uint32_t>(taiHiAndCyc >> 32);
+        auto isr        = static_cast<std::uint32_t>(isrAndRaw);
+        auto isrRaw     = static_cast<std::uint32_t>(isrAndRaw >> 32);
 
         // Decode IDENT as ASCII string
         char identStr[5];
@@ -84,7 +93,7 @@ public:
         identStr[3] = static_cast<char>((ident >>  0) & 0xFF);
         identStr[4] = '\0';
 
-        std::printf("\n=== WREN Host Register Dump (BAR1, %d reads) ===\n", NUM_READS);
+        std::printf("\n=== WREN Host Register Dump (BAR1, %d transactions: 5x64-bit + 2x32-bit) ===\n", NUM_TRANSACTIONS);
         std::printf("  ident:        0x%08X  (\"%s\")\n", ident, identStr);
         std::printf("  map_version:  0x%08X\n", mapVersion);
         std::printf("  model_id:     0x%08X\n", modelId);
@@ -101,7 +110,7 @@ public:
         std::printf("  isr_raw:      0x%08X\n", isrRaw);
         std::printf("  imr:          0x%08X\n", imr);
         std::printf("  ---\n");
-        std::printf("  %ld ns total / %d reads = %ld ns avg per PCIe read\n\n", totalNs, NUM_READS, totalNs / NUM_READS);
+        std::printf("  %ld ns total / %d PCIe transactions = %ld ns avg\n\n", totalNs, NUM_TRANSACTIONS, totalNs / NUM_TRANSACTIONS);
     }
 
     // Busy-poll the async ring buffer for CTIM/LTIM events with due times
@@ -151,57 +160,76 @@ public:
 
             // Process all new capsules
             while (shadowOff != boardOff) {
-                std::uint32_t hdr = readRingWord(shadowOff);
-                std::uint8_t  typ = hdr & HDR_TYP_MASK;
-                std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
+                // Check if entire 4-word capsule fits without ring wrap
+                bool noWrap = (shadowOff + 3) <= RING_MASK;
 
-                if (len == 0 || len > 2048) {
-                    std::printf("  [ERROR] Invalid capsule len=%u at offset=%u, aborting\n", len, shadowOff);
-                    goto done;
-                }
-
-                if (typ == TYP_EVENT && (shadowOff + 3) <= RING_MASK) {
-                    // Fast path: no ring wrap, use 64-bit reads (2 PCIe round-trips instead of 3)
+                if (noWrap) {
+                    // Fast path: 2x 64-bit reads for entire capsule (2 PCIe round-trips)
                     auto tParse = std::chrono::steady_clock::now();
 
-                    // 64-bit read: word 1 (ids) + word 2 (nsec) in one PCIe transaction
-                    std::uint64_t idsAndNsec = *m_pcieHandler.registerPtr<std::uint64_t>(
-                        WREN_ASYNC_DATA_BASE + ((shadowOff + 1) & RING_MASK) * 4);
-                    // 32-bit read: word 3 (sec)
-                    std::uint32_t sec = readRingWord((shadowOff + 3) & RING_MASK);
+                    // 64-bit read #1: header (word 0) + ids (word 1)
+                    std::uint64_t hdrAndIds = *m_pcieHandler.registerPtr<std::uint64_t>(
+                        WREN_ASYNC_DATA_BASE + shadowOff * 4);
+                    auto hdr = static_cast<std::uint32_t>(hdrAndIds);
+                    std::uint8_t  typ = hdr & HDR_TYP_MASK;
+                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
 
-                    auto parseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - tParse).count();
-                    totalParseNs += parseNs;
+                    if (len == 0 || len > 2048) {
+                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u, aborting\n", len, shadowOff);
+                        goto done;
+                    }
 
-                    // Little-endian: low 32 bits = word at lower address (ids), high 32 bits = word at higher address (nsec)
-                    auto ids  = static_cast<std::uint32_t>(idsAndNsec);
-                    auto nsec = static_cast<std::uint32_t>(idsAndNsec >> 32);
-                    std::uint16_t evId   = ids & EVT_ID_MASK;
-                    std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
+                    if (typ == TYP_EVENT) {
+                        // 64-bit read #2: nsec (word 2) + sec (word 3)
+                        std::uint64_t nsecAndSec = *m_pcieHandler.registerPtr<std::uint64_t>(
+                            WREN_ASYNC_DATA_BASE + (shadowOff + 2) * 4);
 
-                    std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 64-bit]\n",
-                                ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
-                } else if (typ == TYP_EVENT) {
-                    // Slow path: capsule wraps around ring boundary, fall back to 32-bit reads
-                    auto tParse = std::chrono::steady_clock::now();
+                        auto parseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - tParse).count();
+                        totalParseNs += parseNs;
 
-                    std::uint32_t ids  = readRingWord((shadowOff + 1) & RING_MASK);
-                    std::uint32_t nsec = readRingWord((shadowOff + 2) & RING_MASK);
-                    std::uint32_t sec  = readRingWord((shadowOff + 3) & RING_MASK);
+                        auto ids  = static_cast<std::uint32_t>(hdrAndIds >> 32);
+                        auto nsec = static_cast<std::uint32_t>(nsecAndSec);
+                        auto sec  = static_cast<std::uint32_t>(nsecAndSec >> 32);
+                        std::uint16_t evId   = ids & EVT_ID_MASK;
+                        std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
 
-                    auto parseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - tParse).count();
-                    totalParseNs += parseNs;
+                        std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 2x64]\n",
+                                    ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
+                    }
 
-                    std::uint16_t evId   = ids & EVT_ID_MASK;
-                    std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
+                    shadowOff = (shadowOff + len) & RING_MASK;
+                } else {
+                    // Slow path: near ring boundary, use 32-bit reads with wrap masking
+                    std::uint32_t hdr = readRingWord(shadowOff);
+                    std::uint8_t  typ = hdr & HDR_TYP_MASK;
+                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
 
-                    std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 32-bit]\n",
-                                ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
+                    if (len == 0 || len > 2048) {
+                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u, aborting\n", len, shadowOff);
+                        goto done;
+                    }
+
+                    if (typ == TYP_EVENT) {
+                        auto tParse = std::chrono::steady_clock::now();
+
+                        std::uint32_t ids  = readRingWord((shadowOff + 1) & RING_MASK);
+                        std::uint32_t nsec = readRingWord((shadowOff + 2) & RING_MASK);
+                        std::uint32_t sec  = readRingWord((shadowOff + 3) & RING_MASK);
+
+                        auto parseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - tParse).count();
+                        totalParseNs += parseNs;
+
+                        std::uint16_t evId   = ids & EVT_ID_MASK;
+                        std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
+
+                        std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 32-bit]\n",
+                                    ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
+                    }
+
+                    shadowOff = (shadowOff + len) & RING_MASK;
                 }
-
-                shadowOff = (shadowOff + len) & RING_MASK;
             }
         }
 
@@ -213,7 +241,7 @@ public:
         if (pollCount > 0)
             std::printf("  Avg poll read:      %ld ns\n", totalPollNs / pollCount);
         if (eventsFound > 0)
-            std::printf("  Avg event parse:    %ld ns (1x 64-bit read + 1x 32-bit read)\n",
+            std::printf("  Avg event parse:    %ld ns (2x 64-bit reads)\n",
                         totalParseNs / eventsFound);
         std::printf("\n");
     }
