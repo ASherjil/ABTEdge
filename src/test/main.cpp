@@ -4,6 +4,7 @@
 
 #include "dummyRegisters.hpp"
 #include "TXMC635Tester.hpp"
+#include "WRENTester.hpp"
 #include <cstdio>
 #include <chrono>
 #include <thread>
@@ -32,9 +33,14 @@ int main() {
 #endif
 
 #ifdef FPGA_PLATFORM_X86_PCIE
+/*
     TXMC635Tester txmc635Tester;
     txmc635Tester.performCPLDLatencyTest();
     txmc635Tester.performADCAcquisition();
+*/
+    WRENTester wrenTester;
+    wrenTester.performHostRegisterDump();
+    wrenTester.pollTimingEvents(30);
 #endif
 
     return 0;
