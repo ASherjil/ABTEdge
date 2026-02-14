@@ -16,17 +16,21 @@ using namespace fpga::regs::dummy_hw_desc;
 using namespace std::chrono_literals;
 
 int main() {
-
-#ifdef FPGA_PLATFORM_X86_PCIE
-    x86_64Tuner tuner(4, 99);  // pin to core 4, SCHED_FIFO:99
-#else
-    // ARM64 fallback: basic RT setup only
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
+    // Lock all current and future pages in RAM — prevents page faults
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
         std::fprintf(stderr, "WARNING: mlockall failed (run as root)\n");
+    }
+
+    // Set real-time scheduling — prevents kernel preemption during measurements
     struct sched_param sp{.sched_priority = 99};
-    if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0)
+    if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0) {
         std::fprintf(stderr, "WARNING: SCHED_FIFO failed (run as root)\n");
-#endif
+    }
+
+    // Optional: full system tuning (IRQ isolation, CPU pinning, governor)
+    // #ifdef FPGA_PLATFORM_X86_PCIE
+    //     x86_64Tuner tuner(4, 99);
+    // #endif
 
 #ifdef FPGA_PLATFORM_ARM_AXI
     AXIBusTester diotTester;
