@@ -142,6 +142,7 @@ add_subdirectory(src/backends)
 # --- Latency Test (measures register write latency via oscilloscope) ---
 add_executable(latency_test
         src/test/main.cpp
+        src/test/WRENTester.cpp
 )
 
 target_include_directories(latency_test PRIVATE

@@ -7,7 +7,6 @@
 #include "backends/PCIeBackend.hpp"
 #include <cstdint>
 #include <cstdio>
-#include <chrono>
 
 // WREN PCI identification
 constexpr std::uint16_t WREN_VENDOR_ID = 0x10DC; // CERN
@@ -34,366 +33,78 @@ constexpr std::size_t WREN_ASYNC_DATA_BASE  = 0x12000; // async_data[0..2047]
 constexpr std::size_t WREN_ASYNC_BOARD_OFF  = 0x14000; // firmware write pointer
 constexpr std::size_t WREN_ASYNC_HOST_OFF   = 0x14004; // driver read pointer — NEVER write
 
+// ── Mailbox register offsets (from BAR1 base) ──
+// mb_map.h: struct is at BAR1+0x10000
+constexpr std::uint32_t B2H_CSR  = 0x10000;          // poll this for reply
+constexpr std::uint32_t B2H_CMD  = 0x10008;          // reply command
+constexpr std::uint32_t B2H_LEN  = 0x1000C;          // reply length (words)
+constexpr std::uint32_t B2H_DATA = 0x10010;          // reply data
+
+constexpr std::uint32_t H2B_CSR  = 0x11000;          // write READY to send
+constexpr std::uint32_t H2B_CMD  = 0x11008;          // command ID
+constexpr std::uint32_t H2B_LEN  = 0x1100C;          // data length (words)
+constexpr std::uint32_t H2B_DATA = 0x11010;          // data words
+
+constexpr std::uint32_t MB_CSR_READY = 0x1;
+constexpr std::uint32_t CMD_REPLY    = 0x80000000;
+constexpr std::uint32_t CMD_ERROR    = 0x40000000;
+
+// ── Command IDs (counted from wren-mb-cmds.def) ──
+constexpr std::uint32_t CMD_RX_SET_COND   = 18;
+constexpr std::uint32_t CMD_RX_SET_ACTION = 21;
+constexpr std::uint32_t CMD_RX_SUBSCRIBE  = 38;
+
+// ── Async ring (same offsets you already use in ABTWREN) ──
+constexpr std::uint32_t ASYNC_DATA  = 0x12000;
+constexpr std::uint32_t ASYNC_BOARD = 0x14000;
+
+// ── Capsule types ──
+constexpr std::uint8_t ASYNC_EVENT  = 0x02;
+constexpr std::uint8_t ASYNC_CONFIG = 0x03;
+constexpr std::uint8_t ASYNC_PULSE  = 0x04;
+
+// ── Pulser flags (from wren-mb-defs.h:162-168) ──
+constexpr std::uint8_t FLAG_INT_EN = (1 << 2);       // 0x04 — generate interrupt
+constexpr std::uint8_t FLAG_ENABLE = (1 << 7);       // 0x80 — enable config
+
+// ── Our chosen indices (high range, won't collide with LTIM driver) ──
+constexpr std::uint16_t OUR_COND_IDX = 1100;
+constexpr std::uint32_t OUR_ACT_IDX  = 2040;
+constexpr std::uint8_t  OUR_PULSER   = 29;           // channel 30, free
+constexpr std::uint32_t OUR_SRC_IDX  = 0;            // primary WR source
+constexpr std::uint32_t OUR_EV_ID    = 142;          // PIX.AMCLO-CT
+
+constexpr std::uint16_t INPUT_NOSTART   = 31;   // AUTO — fire on comparator match, no ext trigger
+constexpr std::uint16_t INPUT_NOSTOP    = 31;   // NONE
+constexpr std::uint16_t INPUT_CLK_1KHZ  = 23;
+constexpr std::uint16_t INPUT_CLK_10MHZ = 25;
+constexpr std::uint16_t INPUT_CLK_1GHZ  = 31;
+
 class WRENTester {
 public:
-    WRENTester()
-        : m_pcieHandler{WREN_VENDOR_ID, WREN_DEVICE_ID, WREN_BAR} {
-        m_connected = m_pcieHandler.open();
-
-        if (!m_connected) {
-            std::fprintf(stderr, "Connection failure, unable to open WREN PCIe device.\n");
-            return;
-        }
-
-        std::fprintf(stderr, "DEBUG: WREN PCIe open=%d base=%p size=%zu\n",
-                     m_connected, m_pcieHandler.getBaseAddress(),
-                     m_pcieHandler.getMmapSize());
-    }
+    WRENTester();
 
     // Bulk read all safe host registers with timing
     // Uses 64-bit reads to pair adjacent registers (7 PCIe round-trips instead of 12)
-    void performHostRegisterDump() {
-        if (!m_connected) {
-            std::printf("WREN connection failed, skipping test\n");
-            return;
-        }
-
-        constexpr int NUM_TRANSACTIONS = 7; // 5x 64-bit + 2x 32-bit
-
-        auto t0 = std::chrono::steady_clock::now();
-        // 64-bit reads: pair adjacent registers into single PCIe transactions
-        std::uint64_t identAndMap   = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_IDENT);       // 0x00+0x04
-        std::uint64_t modelAndFw    = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_MODEL_ID);    // 0x08+0x0C
-        std::uint64_t stateAndTaiLo = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_WR_STATE);    // 0x10+0x14
-        std::uint64_t taiHiAndCyc   = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_TM_TAI_HI);  // 0x18+0x1C
-        std::uint32_t compact       = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_TM_COMPACT);  // 0x20 (gap to 0x28)
-        std::uint64_t isrAndRaw     = *m_pcieHandler.registerPtr<std::uint64_t>(WREN_ISR);         // 0x28+0x2C
-        std::uint32_t imr           = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_IMR);         // 0x30
-        auto t1 = std::chrono::steady_clock::now();
-
-        auto totalNs = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-
-        // Little-endian: low 32 bits = lower address, high 32 bits = higher address
-        auto ident      = static_cast<std::uint32_t>(identAndMap);
-        auto mapVersion = static_cast<std::uint32_t>(identAndMap >> 32);
-        auto modelId    = static_cast<std::uint32_t>(modelAndFw);
-        auto fwVersion  = static_cast<std::uint32_t>(modelAndFw >> 32);
-        auto wrState    = static_cast<std::uint32_t>(stateAndTaiLo);
-        auto taiLo      = static_cast<std::uint32_t>(stateAndTaiLo >> 32);
-        auto taiHi      = static_cast<std::uint32_t>(taiHiAndCyc);
-        auto cycles     = static_cast<std::uint32_t>(taiHiAndCyc >> 32);
-        auto isr        = static_cast<std::uint32_t>(isrAndRaw);
-        auto isrRaw     = static_cast<std::uint32_t>(isrAndRaw >> 32);
-
-        // Decode IDENT as ASCII string
-        char identStr[5];
-        identStr[0] = static_cast<char>((ident >> 24) & 0xFF);
-        identStr[1] = static_cast<char>((ident >> 16) & 0xFF);
-        identStr[2] = static_cast<char>((ident >>  8) & 0xFF);
-        identStr[3] = static_cast<char>((ident >>  0) & 0xFF);
-        identStr[4] = '\0';
-
-        std::printf("\n=== WREN Host Register Dump (BAR1, %d transactions: 5x64-bit + 2x32-bit) ===\n", NUM_TRANSACTIONS);
-        std::printf("  ident:        0x%08X  (\"%s\")\n", ident, identStr);
-        std::printf("  map_version:  0x%08X\n", mapVersion);
-        std::printf("  model_id:     0x%08X\n", modelId);
-        std::printf("  fw_version:   0x%08X\n", fwVersion);
-        std::printf("  wr_state:     0x%08X  (link=%s, time=%s)\n",
-                    wrState,
-                    (wrState & 0x1) ? "UP" : "DOWN",
-                    (wrState & 0x2) ? "VALID" : "INVALID");
-        std::printf("  tm_tai_lo:    0x%08X  (%u s)\n", taiLo, taiLo);
-        std::printf("  tm_tai_hi:    0x%08X\n", taiHi);
-        std::printf("  tm_cycles:    0x%08X  (%u ns)\n", cycles, (cycles & 0x0FFFFFFF) * 16);
-        std::printf("  tm_compact:   0x%08X\n", compact);
-        std::printf("  isr:          0x%08X\n", isr);
-        std::printf("  isr_raw:      0x%08X\n", isrRaw);
-        std::printf("  imr:          0x%08X\n", imr);
-        std::printf("  ---\n");
-        std::printf("  %ld ns total / %d PCIe transactions = %ld ns avg\n\n", totalNs, NUM_TRANSACTIONS, totalNs / NUM_TRANSACTIONS);
-    }
+    void performHostRegisterDump();
 
     // Busy-poll the async ring buffer for CTIM/LTIM events with due times
     // Self-terminates after durationSeconds as a watchdog safety measure
-    void pollTimingEvents(int durationSeconds = 30) {
-        if (!m_connected) {
-            std::printf("WREN connection failed, skipping test\n");
-            return;
-        }
+    void pollTimingEvents(int durationSeconds = 30);
 
-        // Capsule header bit masks (word 0 of every capsule)
-        constexpr std::uint32_t HDR_TYP_MASK = 0x000000FF; // bits [7:0]
-        constexpr std::uint32_t HDR_LEN_MASK = 0xFFFF0000; // bits [31:16]
-        constexpr unsigned      HDR_LEN_SHIFT = 16;
-        constexpr std::uint8_t  TYP_EVENT    = 0x02;       // CMD_ASYNC_EVENT
+    // Subscribe to CTIM via mailbox, then poll ring buffer for EVENT/CONFIG/PULSE capsules.
+    // Dynamically learns sw_cmp_idx from CONFIG to match our pulser's PULSE capsules.
+    void trackCTIMEvents(int durationSeconds = 30);
 
-        // Event capsule word 1 masks
-        constexpr std::uint32_t EVT_ID_MASK   = 0x0000FFFF; // bits [15:0]
-        constexpr std::uint32_t CTXT_ID_MASK  = 0xFFFF0000; // bits [31:16]
-        constexpr unsigned      CTXT_ID_SHIFT = 16;
-
-        constexpr std::uint32_t RING_MASK = 2047; // wrap at 2048 words
-
-        std::printf("\n=== WREN Event Poll (watchdog: %ds) ===\n", durationSeconds);
-        std::printf("  Listening for CTIM/LTIM events (typ=0x02)...\n");
-        std::printf("  (Requires active wren-pcie driver with event subscriptions)\n\n");
-
-        // Sync to current ring buffer position
-        std::uint32_t shadowOff = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ASYNC_BOARD_OFF);
-        std::printf("  Initial async_board_off: %u\n\n", shadowOff);
-
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(durationSeconds);
-        int eventsFound = 0;
-        long totalPollNs = 0;
-        long totalParseNs = 0;
-        long pollCount = 0;
-
-        while (std::chrono::steady_clock::now() < deadline) {
-            auto tPoll = std::chrono::steady_clock::now();
-            std::uint32_t boardOff = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ASYNC_BOARD_OFF);
-            totalPollNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - tPoll).count();
-            ++pollCount;
-
-            if (boardOff == shadowOff)
-                continue;
-
-            // Process all new capsules
-            while (shadowOff != boardOff) {
-                // Check if entire 4-word capsule fits without ring wrap
-                bool noWrap = (shadowOff + 3) <= RING_MASK;
-
-                if (noWrap) {
-                    // Fast path: 2x 64-bit reads for entire capsule (2 PCIe round-trips)
-                    auto tParse = std::chrono::steady_clock::now();
-
-                    // 64-bit read #1: header (word 0) + ids (word 1)
-                    std::uint64_t hdrAndIds = *m_pcieHandler.registerPtr<std::uint64_t>(
-                        WREN_ASYNC_DATA_BASE + shadowOff * 4);
-                    auto hdr = static_cast<std::uint32_t>(hdrAndIds);
-                    std::uint8_t  typ = hdr & HDR_TYP_MASK;
-                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
-
-                    if (len == 0 || len > 2048) {
-                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u, aborting\n", len, shadowOff);
-                        goto done;
-                    }
-
-                    if (typ == TYP_EVENT) {
-                        // 64-bit read #2: nsec (word 2) + sec (word 3)
-                        std::uint64_t nsecAndSec = *m_pcieHandler.registerPtr<std::uint64_t>(
-                            WREN_ASYNC_DATA_BASE + (shadowOff + 2) * 4);
-
-                        auto parseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now() - tParse).count();
-                        totalParseNs += parseNs;
-
-                        auto ids  = static_cast<std::uint32_t>(hdrAndIds >> 32);
-                        auto nsec = static_cast<std::uint32_t>(nsecAndSec);
-                        auto sec  = static_cast<std::uint32_t>(nsecAndSec >> 32);
-                        std::uint16_t evId   = ids & EVT_ID_MASK;
-                        std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
-
-                        std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 2x64]\n",
-                                    ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
-                    }
-
-                    shadowOff = (shadowOff + len) & RING_MASK;
-                } else {
-                    // Slow path: near ring boundary, use 32-bit reads with wrap masking
-                    std::uint32_t hdr = readRingWord(shadowOff);
-                    std::uint8_t  typ = hdr & HDR_TYP_MASK;
-                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
-
-                    if (len == 0 || len > 2048) {
-                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u, aborting\n", len, shadowOff);
-                        goto done;
-                    }
-
-                    if (typ == TYP_EVENT) {
-                        auto tParse = std::chrono::steady_clock::now();
-
-                        std::uint32_t ids  = readRingWord((shadowOff + 1) & RING_MASK);
-                        std::uint32_t nsec = readRingWord((shadowOff + 2) & RING_MASK);
-                        std::uint32_t sec  = readRingWord((shadowOff + 3) & RING_MASK);
-
-                        auto parseNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now() - tParse).count();
-                        totalParseNs += parseNs;
-
-                        std::uint16_t evId   = ids & EVT_ID_MASK;
-                        std::uint16_t ctxtId = static_cast<std::uint16_t>((ids & CTXT_ID_MASK) >> CTXT_ID_SHIFT);
-
-                        std::printf("  #%-4d  EVENT  ev_id=%-5u  ctxt_id=%-3u  due_time=%u.%09u TAI  [%ld ns, 32-bit]\n",
-                                    ++eventsFound, evId, ctxtId, sec, nsec, parseNs);
-                    }
-
-                    shadowOff = (shadowOff + len) & RING_MASK;
-                }
-            }
-        }
-
-    done:
-        std::printf("\n  --- Summary ---\n");
-        std::printf("  Watchdog:           %d seconds\n", durationSeconds);
-        std::printf("  Poll iterations:    %ld\n", pollCount);
-        std::printf("  Events caught:      %d\n", eventsFound);
-        if (pollCount > 0)
-            std::printf("  Avg poll read:      %ld ns\n", totalPollNs / pollCount);
-        if (eventsFound > 0)
-            std::printf("  Avg event parse:    %ld ns (2x 64-bit reads)\n",
-                        totalParseNs / eventsFound);
-        std::printf("\n");
-    }
-
-    // Catch PIX.AMCLO-CT (ev_id=142) then wait for LTIM comp_idx=1 pulse (50ms delay).
-    // Measures: timestamp jitter (predicted vs actual) and PCIe read latency to userspace.
-    void measureLtimPulseJitter(int durationSeconds = 30) {
-        if (!m_connected) {
-            std::printf("WREN connection failed, skipping test\n");
-            return;
-        }
-
-        constexpr std::uint32_t HDR_TYP_MASK  = 0x000000FF;
-        constexpr std::uint32_t HDR_LEN_MASK  = 0xFFFF0000;
-        constexpr unsigned      HDR_LEN_SHIFT = 16;
-        constexpr std::uint8_t  TYP_EVENT     = 0x02;
-        constexpr std::uint8_t  TYP_PULSE     = 0x04;
-        constexpr std::uint32_t EVT_ID_MASK   = 0x0000FFFF;
-        constexpr std::uint16_t AMCLO_EV_ID   = 142;
-        constexpr std::uint32_t RING_MASK     = 2047;
-        constexpr std::uint32_t TARGET_COMP   = 1;       // comp_idx for WRLTIM_0-23_EC
-        constexpr std::uint64_t LTIM23_DELAY_NS = 50'000'000ULL; // 50ms
-
-        std::printf("\n=== LTIM Pulse Jitter Test (WRLTIM_0-23_EC, comp=%u) ===\n", TARGET_COMP);
-        std::printf("  CTIM: PIX.AMCLO-CT (ev_id=142)  |  LTIM: 1kHz, 50ms delay\n");
-        std::printf("  Watchdog: %ds\n\n", durationSeconds);
-
-        std::uint32_t shadowOff = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ASYNC_BOARD_OFF);
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(durationSeconds);
-
-        struct Prediction {
-            std::uint64_t predicted_tai_ns;
-            bool active;
-        };
-        constexpr int MAX_PENDING = 16;
-        Prediction pending[MAX_PENDING] = {};
-        int pendingIdx = 0;
-
-        int ctimCount = 0, pulseTotal = 0, matchCount = 0;
-        std::int64_t jitterSum = 0, jitterMin = INT64_MAX, jitterMax = INT64_MIN;
-        long parseNsSum = 0, parseNsMin = LONG_MAX, parseNsMax = 0;
-
-        while (std::chrono::steady_clock::now() < deadline) {
-            std::uint32_t boardOff = *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ASYNC_BOARD_OFF);
-            if (boardOff == shadowOff)
-                continue;
-
-            while (shadowOff != boardOff) {
-                bool noWrap = (shadowOff + 3) <= RING_MASK;
-
-                if (noWrap) {
-                    auto tRead = std::chrono::steady_clock::now();
-
-                    // 64-bit read #1: header (word 0) + word 1
-                    std::uint64_t hdrAndW1 = *m_pcieHandler.registerPtr<std::uint64_t>(
-                        WREN_ASYNC_DATA_BASE + shadowOff * 4);
-                    auto hdr = static_cast<std::uint32_t>(hdrAndW1);
-                    auto w1  = static_cast<std::uint32_t>(hdrAndW1 >> 32);
-                    std::uint8_t  typ = hdr & HDR_TYP_MASK;
-                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
-
-                    if (len == 0 || len > 2048) {
-                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u\n", len, shadowOff);
-                        goto ltim_done;
-                    }
-
-                    if (typ == TYP_EVENT) {
-                        std::uint16_t evId = w1 & EVT_ID_MASK;
-                        if (evId == AMCLO_EV_ID) {
-                            std::uint64_t w2w3 = *m_pcieHandler.registerPtr<std::uint64_t>(
-                                WREN_ASYNC_DATA_BASE + (shadowOff + 2) * 4);
-                            auto nsec = static_cast<std::uint32_t>(w2w3);
-                            auto sec  = static_cast<std::uint32_t>(w2w3 >> 32);
-
-                            std::uint64_t pred_tai_ns =
-                                static_cast<std::uint64_t>(sec) * 1'000'000'000ULL + nsec + LTIM23_DELAY_NS;
-
-                            int idx = pendingIdx++ % MAX_PENDING;
-                            pending[idx] = {pred_tai_ns, true};
-                            ++ctimCount;
-
-                            std::printf("  CTIM #%-3d  due=%u.%09u\n", ctimCount, sec, nsec);
-                        }
-                    } else if (typ == TYP_PULSE && w1 == TARGET_COMP) {
-                        // 64-bit read #2: timestamp (only for our target LTIM)
-                        std::uint64_t w2w3 = *m_pcieHandler.registerPtr<std::uint64_t>(
-                            WREN_ASYNC_DATA_BASE + (shadowOff + 2) * 4);
-
-                        auto readNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now() - tRead).count();
-
-                        auto pulse_sec  = static_cast<std::uint32_t>(w2w3);
-                        auto pulse_nsec = static_cast<std::uint32_t>(w2w3 >> 32);
-                        ++pulseTotal;
-
-                        std::uint64_t pulse_tai_ns =
-                            static_cast<std::uint64_t>(pulse_sec) * 1'000'000'000ULL + pulse_nsec;
-
-                        // Match against pending CTIM predictions (±5ms window)
-                        for (int i = 0; i < MAX_PENDING; ++i) {
-                            if (!pending[i].active) continue;
-                            auto jitter = static_cast<std::int64_t>(pulse_tai_ns - pending[i].predicted_tai_ns);
-                            if (jitter > -5'000'000 && jitter < 5'000'000) {
-                                pending[i].active = false;
-                                ++matchCount;
-                                std::int64_t absJ = (jitter < 0) ? -jitter : jitter;
-                                jitterSum += absJ;
-                                if (jitter < jitterMin) jitterMin = jitter;
-                                if (jitter > jitterMax) jitterMax = jitter;
-                                parseNsSum += readNs;
-                                if (readNs < parseNsMin) parseNsMin = readNs;
-                                if (readNs > parseNsMax) parseNsMax = readNs;
-
-                                std::printf("  PULSE #%-3d  fired=%u.%09u  jitter=%+ld ns  read=%ld ns\n",
-                                            matchCount, pulse_sec, pulse_nsec, jitter, readNs);
-                                break;
-                            }
-                        }
-                    }
-
-                    shadowOff = (shadowOff + len) & RING_MASK;
-                } else {
-                    std::uint32_t hdr = readRingWord(shadowOff);
-                    std::uint16_t len = static_cast<std::uint16_t>((hdr & HDR_LEN_MASK) >> HDR_LEN_SHIFT);
-                    if (len == 0 || len > 2048) {
-                        std::printf("  [ERROR] Invalid capsule len=%u at offset=%u\n", len, shadowOff);
-                        goto ltim_done;
-                    }
-                    shadowOff = (shadowOff + len) & RING_MASK;
-                }
-            }
-        }
-
-    ltim_done:
-        std::printf("\n  --- Summary ---\n");
-        std::printf("  CTIMs caught:     %d\n", ctimCount);
-        std::printf("  LTIM-1 pulses:    %d  (matched: %d)\n", pulseTotal, matchCount);
-        if (matchCount > 0) {
-            std::printf("  Jitter:  min=%+ld  max=%+ld  avg=%ld ns (abs)\n",
-                        jitterMin, jitterMax, jitterSum / matchCount);
-            std::printf("  PCIe read (2x64-bit parse):  min=%ld  max=%ld  avg=%ld ns\n",
-                        parseNsMin, parseNsMax, parseNsSum / matchCount);
-        }
-        std::printf("\n");
-    }
-
+    void setupCTIMSubscription();
 private:
     // Read a single 32-bit word from the async ring buffer at the given word index
-    [[nodiscard]]
-    std::uint32_t readRingWord(std::uint32_t wordIndex) const {
+    [[nodiscard, gnu::always_inline]]
+    inline std::uint32_t readRingWord(std::uint32_t wordIndex) const {
         return *m_pcieHandler.registerPtr<std::uint32_t>(WREN_ASYNC_DATA_BASE + wordIndex * 4);
     }
+
+    bool mbSend(std::uint32_t cmd, const void* data, std::size_t words) ;
 
     PCIeBackend m_pcieHandler;
     bool m_connected{};
