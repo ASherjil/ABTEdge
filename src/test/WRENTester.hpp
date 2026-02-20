@@ -80,9 +80,14 @@ constexpr std::uint16_t INPUT_CLK_1KHZ  = 23;
 constexpr std::uint16_t INPUT_CLK_10MHZ = 25;
 constexpr std::uint16_t INPUT_CLK_1GHZ  = 31;
 
+constexpr std::uint32_t CMD_RX_DEL_ACTION = 22;
+constexpr std::uint32_t CMD_RX_DEL_COND   = 19;
+
 class WRENTester {
 public:
     WRENTester();
+
+    ~WRENTester();
 
     // Bulk read all safe host registers with timing
     // Uses 64-bit reads to pair adjacent registers (7 PCIe round-trips instead of 12)
@@ -105,6 +110,7 @@ private:
     }
 
     bool mbSend(std::uint32_t cmd, const void* data, std::size_t words) ;
+    void cleanupCTIMSubscription();
 
     PCIeBackend m_pcieHandler;
     bool m_connected{};

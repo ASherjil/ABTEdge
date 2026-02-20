@@ -19,6 +19,9 @@ WRENTester::WRENTester()
                m_pcieHandler.getMmapSize());
 }
 
+WRENTester::~WRENTester() {
+    cleanupCTIMSubscription(); // delete the created LTIM
+}
 
 void WRENTester::performHostRegisterDump() {
     if (!m_connected) {
@@ -475,4 +478,26 @@ bool WRENTester::mbSend(std::uint32_t cmd, const void* data, std::size_t words) 
 
     std::printf("  OK (reply=0x%08X)\n", reply);
     return true;
+}
+
+void WRENTester::cleanupCTIMSubscription()
+{
+    // 1. Delete action FIRST (unlinks from condition)
+    const std::uint32_t actIdx = OUR_ACT_IDX;   // 2040
+    if (!mbSend(CMD_RX_DEL_ACTION, &actIdx, 1)) {
+        std::printf("DEL_ACTION act=%u failed!\n", actIdx);
+    }
+    else {
+        std::printf("DEL_ACTION act=%u completed\n", actIdx);
+    }
+
+    // 2. Now delete condition (safe — no action linked)
+    const std::uint32_t condIdx = OUR_COND_IDX; // 1100
+    if (!mbSend(CMD_RX_DEL_COND, &condIdx, 1)) {
+        std::printf("DEL_COND cond=%u failed!\n", condIdx);
+    }
+    else {
+        std::printf("DEL_COND cond=%u completed\n", condIdx);
+    }
+    // Do NOT unsubscribe ev142 — channel 23's LTIM also uses it
 }
