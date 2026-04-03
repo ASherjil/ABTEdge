@@ -29,6 +29,6 @@ private:
 };
 
 // must check if the concept is satified
-//static_assert(FPGABackend<PCIeBackend>, "PCIeBackend must statify the FPGABackend concept");
+static_assert(HardwareBus<PCIeBackend>, "PCIeBackend must statify the HardwareBus concept");
 
 #endif //ABTEDGE_PCIEBACKEND_H

@@ -11,25 +11,25 @@
 
 class BackendBase {
 public:
-    // Rule of 5 implementation for a move-only object
-    BackendBase() = default;
-    BackendBase(const BackendBase&) = delete;
-    BackendBase(BackendBase&& other) noexcept;
-    BackendBase& operator=(const BackendBase&) = delete;
-    BackendBase& operator=(BackendBase&& other) noexcept;
-    ~BackendBase();
+	// Rule of 5 implementation for a move-only object
+	BackendBase() = default;
+	BackendBase(const BackendBase&) = delete;
+	BackendBase(BackendBase&& other) noexcept;
+	BackendBase& operator=(const BackendBase&) = delete;
+	BackendBase& operator=(BackendBase&& other) noexcept;
+	~BackendBase();
 
-    [[nodiscard]] bool open(const char* resource, std::size_t physicalAddress, std::size_t size);
-    [[nodiscard]] bool isOpen() const noexcept;
-    [[nodiscard]] void* getBaseAddress() const noexcept;
-    [[nodiscard]] std::size_t getMmapSize() const noexcept;
+	[[nodiscard]] bool open(const char* resource, std::size_t physicalAddress, std::size_t size);
+	[[nodiscard]] bool isOpen() const noexcept;
+	[[nodiscard]] void* getBaseAddress() const noexcept;
+	[[nodiscard]] std::size_t getMmapSize() const noexcept;
 
-    // Use this function directly for read/write. No need for wrappers or excessive function calls.
-    template<typename T>
-    [[nodiscard, gnu::always_inline]]
-    inline volatile T* registerPtr(std::size_t offset) const noexcept {
-        return reinterpret_cast<volatile T*>(reinterpret_cast<std::uint8_t*>(m_baseAddress) + offset);
-    }
+	// Use this function directly for read/write. No need for wrappers or excessive function calls.
+	template<typename T>
+	[[nodiscard, gnu::always_inline]]
+	inline volatile T* registerPtr(std::size_t offset) const noexcept {
+	    return reinterpret_cast<volatile T*>(reinterpret_cast<std::uint8_t*>(m_baseAddress) + offset);
+	}
 
 	template<auto Mask>
 	[[nodiscard, gnu::always_inline]]
@@ -56,11 +56,11 @@ public:
 		*registerPtr<T>(offset) = newValue; // write to the register
 	}
 
-    void close();
+	void close();
 protected:
-    int m_fd{-1};
-    void* m_baseAddress{nullptr};
-    std::size_t m_size{0};
+	int m_fd{-1};
+	void* m_baseAddress{nullptr};
+	std::size_t m_size{0};
 };
 
 
