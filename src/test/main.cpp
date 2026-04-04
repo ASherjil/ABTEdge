@@ -11,6 +11,7 @@
 #include <thread>
 #include <sched.h>      // sched_setscheduler, SCHED_FIFO
 #include <sys/mman.h>   // mlockall
+#include "ShmBackend.hpp"
 
 using namespace fpga::regs::dummy_hw_desc;
 using namespace std::chrono_literals;

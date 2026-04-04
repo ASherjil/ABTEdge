@@ -11,3 +11,6 @@ target_sources(fpga_backend PRIVATE
 target_include_directories(fpga_backend PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
+
+# Required for shm_open/shm_unlink (ShmBackend)
+target_link_libraries(fpga_backend PUBLIC rt)
