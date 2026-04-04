@@ -80,7 +80,12 @@ target_compile_options(fpga_driver_flags INTERFACE
         -O3
         -DNDEBUG
         -flto
-        -fno-exceptions      # Optional: disable for lowest latency
+        -fno-exceptions
+        -fno-rtti
+        -fno-unwind-tables
+        -fno-asynchronous-unwind-tables
+        -ffunction-sections
+        -fdata-sections
         >
 )
 
@@ -100,6 +105,7 @@ target_link_options(fpga_driver_flags INTERFACE
         >
         $<$<CONFIG:Release>:
         -flto
+        -Wl,--gc-sections
         >
 )
 

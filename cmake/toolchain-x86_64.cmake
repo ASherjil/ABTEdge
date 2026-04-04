@@ -28,5 +28,9 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
+# Target CPU: Intel i5-8500 (Coffee Lake / Skylake microarch)
+set(CMAKE_C_FLAGS_INIT "-march=skylake -mtune=skylake")
+set(CMAKE_CXX_FLAGS_INIT "-march=skylake -mtune=skylake")
+
 # Platform identifier for our code
 set(FPGA_PLATFORM "X86_PCIE" CACHE STRING "Target platform" FORCE)
