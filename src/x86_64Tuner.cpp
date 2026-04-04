@@ -1,6 +1,6 @@
 #include "x86_64Tuner.hpp"
 
-#ifdef FPGA_PLATFORM_X86_PCIE
+#ifdef ABTEDGE_ARCH_X86_64
 
 #include <cerrno>
 #include <cstdio>
@@ -134,4 +134,4 @@ x86_64Tuner::x86_64Tuner(int cpuCore, int schedPriority)
     std::fprintf(stderr, "[x86_64Tuner] All tuning applied.\n");
 }
 
-#endif // FPGA_PLATFORM_X86_PCIE
+#endif // ABTEDGE_ARCH_X86_64

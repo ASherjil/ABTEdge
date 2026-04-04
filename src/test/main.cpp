@@ -11,7 +11,7 @@
 #include <thread>
 #include <sched.h>      // sched_setscheduler, SCHED_FIFO
 #include <sys/mman.h>   // mlockall
-#include "ShmBackend.hpp"
+#include "ShmTester.hpp"
 
 using namespace fpga::regs::dummy_hw_desc;
 using namespace std::chrono_literals;
@@ -29,26 +29,30 @@ int main() {
     }
 
     // Optional: full system tuning (IRQ isolation, CPU pinning, governor)
-    // #ifdef FPGA_PLATFORM_X86_PCIE
+    // #ifdef ABTEDGE_ARCH_X86_64
     //     x86_64Tuner tuner(4, 99);
     // #endif
 
-#ifdef FPGA_PLATFORM_ARM_AXI
+    // Shared memory test — runs on any platform (uses /dev/shm, no hardware needed)
+    ShmTester shmTester;
+    shmTester.runWriteReadTest();
+
+#ifdef ABTEDGE_ARCH_AARCH64
     AXIBusTester diotTester;
     diotTester.performReadWriteTest();
-    diotTester.generateSquarePulse();
+    //diotTester.generateSquarePulse();
 #endif
 
-#ifdef FPGA_PLATFORM_X86_PCIE
+#ifdef ABTEDGE_ARCH_X86_64
 
     TXMC635Tester txmc635Tester;
     txmc635Tester.performCPLDLatencyTest();
-    txmc635Tester.performADCAcquisition();
+    //txmc635Tester.performADCAcquisition();
 
-    WRENTester wrenTester;
-    wrenTester.performHostRegisterDump();
+    //WRENTester wrenTester;
+    //wrenTester.performHostRegisterDump();
     //wrenTester.pollTimingEvents(30);
-    wrenTester.trackCTIMEvents(30);
+    //wrenTester.trackCTIMEvents(30);
 
 #endif
 

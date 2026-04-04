@@ -33,4 +33,4 @@ set(CMAKE_C_FLAGS_INIT "-march=skylake -mtune=skylake")
 set(CMAKE_CXX_FLAGS_INIT "-march=skylake -mtune=skylake")
 
 # Platform identifier for our code
-set(FPGA_PLATFORM "X86_PCIE" CACHE STRING "Target platform" FORCE)
+set(ABTEDGE_ARCH "X86_64" CACHE STRING "Target platform" FORCE)

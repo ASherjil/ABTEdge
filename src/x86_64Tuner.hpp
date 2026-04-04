@@ -1,7 +1,7 @@
 #ifndef FPGA_DRIVER_X86_64TUNER_HPP
 #define FPGA_DRIVER_X86_64TUNER_HPP
 
-#ifdef FPGA_PLATFORM_X86_PCIE
+#ifdef ABTEDGE_ARCH_X86_64
 
 // Applies low-latency system tuning for PCIe busy-poll workloads on x86_64.
 // All settings persist until reboot — destructor intentionally does not undo.
@@ -17,5 +17,5 @@ public:
     x86_64Tuner& operator=(x86_64Tuner&&) = delete;
 };
 
-#endif // FPGA_PLATFORM_X86_PCIE
+#endif // ABTEDGE_ARCH_X86_64
 #endif // FPGA_DRIVER_X86_64TUNER_HPP

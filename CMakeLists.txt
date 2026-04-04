@@ -1,10 +1,10 @@
 # =============================================================================
-# FPGA Low-Latency Driver
+# ABTEdge — Ultra-low latency kernel-bypass hardware access library
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.21)
 
-project(fpga_driver
+project(abtedge
         VERSION 1.0.0
         DESCRIPTION "ABTEdge"
         LANGUAGES CXX
@@ -25,20 +25,20 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Platform Detection
 # =============================================================================
 
-if(NOT DEFINED FPGA_PLATFORM)
+if(NOT DEFINED ABTEDGE_ARCH)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
-        set(FPGA_PLATFORM "ARM_AXI")
+        set(ABTEDGE_ARCH "AARCH64")
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-        set(FPGA_PLATFORM "X86_PCIE")
+        set(ABTEDGE_ARCH "X86_64")
     else()
-        set(FPGA_PLATFORM "SIMULATED")
+        set(ABTEDGE_ARCH "SIMULATED")
     endif()
 endif()
 
 message(STATUS "======================================")
-message(STATUS "FPGA Driver Configuration")
+message(STATUS "ABTEdge Configuration")
 message(STATUS "======================================")
-message(STATUS "Platform:      ${FPGA_PLATFORM}")
+message(STATUS "Platform:      ${ABTEDGE_ARCH}")
 message(STATUS "Processor:     ${CMAKE_SYSTEM_PROCESSOR}")
 message(STATUS "Build type:    ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Compiler:  ${CMAKE_CXX_COMPILER}")
@@ -48,9 +48,9 @@ message(STATUS "======================================")
 # Compiler Flags
 # =============================================================================
 
-add_library(fpga_driver_flags INTERFACE)
+add_library(abtedge_flags INTERFACE)
 
-target_compile_options(fpga_driver_flags INTERFACE
+target_compile_options(abtedge_flags INTERFACE
         # Warnings
         -Wall
         -Wextra
@@ -64,18 +64,18 @@ target_compile_options(fpga_driver_flags INTERFACE
 if(CMAKE_CROSSCOMPILING)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
         # ARM64 cross-compilation: use generic ARMv8-A
-        target_compile_options(fpga_driver_flags INTERFACE -march=armv8-a)
+        target_compile_options(abtedge_flags INTERFACE -march=armv8-a)
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         # x86_64 cross-compilation: use generic x86-64
-        target_compile_options(fpga_driver_flags INTERFACE -march=x86-64 -mtune=generic)
+        target_compile_options(abtedge_flags INTERFACE -march=x86-64 -mtune=generic)
     endif()
 else()
     # Native compilation: optimize for the build machine
-    target_compile_options(fpga_driver_flags INTERFACE -march=native -mtune=native)
+    target_compile_options(abtedge_flags INTERFACE -march=native -mtune=native)
 endif()
 
 # Release-specific flags
-target_compile_options(fpga_driver_flags INTERFACE
+target_compile_options(abtedge_flags INTERFACE
         $<$<CONFIG:Release>:
         -O3
         -DNDEBUG
@@ -90,7 +90,7 @@ target_compile_options(fpga_driver_flags INTERFACE
 )
 
 # Debug-specific flags
-target_compile_options(fpga_driver_flags INTERFACE
+target_compile_options(abtedge_flags INTERFACE
         $<$<CONFIG:Debug>:
         -O0
         -g3
@@ -99,7 +99,7 @@ target_compile_options(fpga_driver_flags INTERFACE
         >
 )
 
-target_link_options(fpga_driver_flags INTERFACE
+target_link_options(abtedge_flags INTERFACE
         $<$<CONFIG:Debug>:
         -fsanitize=address,undefined
         >
@@ -110,32 +110,32 @@ target_link_options(fpga_driver_flags INTERFACE
 )
 
 # =============================================================================
-# Common Library (header-only: concepts, SPSC queue, messages)
+# Common Library (header-only: concepts, shared memory)
 # =============================================================================
 
-add_library(fpga_common INTERFACE)
+add_library(abtedge_common INTERFACE)
 
-target_include_directories(fpga_common INTERFACE
+target_include_directories(abtedge_common INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(fpga_common INTERFACE
-        fpga_driver_flags
+target_link_libraries(abtedge_common INTERFACE
+        abtedge_flags
 )
 
-target_compile_definitions(fpga_common INTERFACE
-        FPGA_PLATFORM_${FPGA_PLATFORM}
+target_compile_definitions(abtedge_common INTERFACE
+        ABTEDGE_ARCH_${ABTEDGE_ARCH}
 )
 
 # =============================================================================
-# Backend Library (platform-specific hardware access)
+# Backend Library (hardware access: PCIe, AXI, shared memory)
 # =============================================================================
 
-add_library(fpga_backend STATIC)
+add_library(abtedge_backend STATIC)
 
-target_link_libraries(fpga_backend PUBLIC
-        fpga_common
+target_link_libraries(abtedge_backend PUBLIC
+        abtedge_common
 )
 
 # Platform-specific sources added via target_sources in subdirectory
@@ -156,7 +156,7 @@ target_include_directories(latency_test PRIVATE
 )
 
 target_link_libraries(latency_test PRIVATE
-        fpga_backend
+        abtedge_backend
 )
 
 # =============================================================================
@@ -182,7 +182,7 @@ include(GNUInstallDirs)
 # )
 
 install(DIRECTORY src/common src/backends
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fpga_driver
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/abtedge
         FILES_MATCHING PATTERN "*.hpp"
 )
 
@@ -192,6 +192,6 @@ install(DIRECTORY src/common src/backends
 
 message(STATUS "")
 message(STATUS "Targets:")
-message(STATUS "  - fpga_backend        : Backend library (STATIC)")
+message(STATUS "  - abtedge_backend     : Backend library (STATIC)")
 message(STATUS "  - latency_test        : Register write latency test")
 message(STATUS "")

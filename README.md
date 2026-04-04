@@ -41,7 +41,7 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-Platform is auto-detected (`x86_64` → PCIe, `aarch64` → AXI). Override with `-DFPGA_PLATFORM=X86_PCIE` or `-DFPGA_PLATFORM=ARM_AXI`.
+Platform is auto-detected (`x86_64` or `aarch64`). Override with `-DABTEDGE_ARCH=X86_64` or `-DABTEDGE_ARCH=AARCH64`.
 
 ## API
 
