@@ -6,12 +6,14 @@
 #include "TXMC635Tester.hpp"
 #include "WRENTester.hpp"
 #include "x86_64Tuner.hpp"
+#include "ShmTester.hpp"
+#include "DMARing.hpp"
+
 #include <cstdio>
 #include <chrono>
 #include <thread>
 #include <sched.h>      // sched_setscheduler, SCHED_FIFO
 #include <sys/mman.h>   // mlockall
-#include "ShmTester.hpp"
 
 using namespace fpga::regs::dummy_hw_desc;
 using namespace std::chrono_literals;
