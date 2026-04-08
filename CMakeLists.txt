@@ -75,15 +75,14 @@ else()
 endif()
 
 # Release-specific flags
+# Optimisation flags are INTERFACE (propagate to consumers).
+# -fno-exceptions/-fno-rtti are PRIVATE to ABTEdge targets only — consumers
+# may need exceptions/RTTI, so these must not propagate.
 target_compile_options(abtedge_flags INTERFACE
         $<$<CONFIG:Release>:
         -O3
         -DNDEBUG
         -flto
-        -fno-exceptions
-        -fno-rtti
-        -fno-unwind-tables
-        -fno-asynchronous-unwind-tables
         -ffunction-sections
         -fdata-sections
         >
@@ -138,26 +137,38 @@ target_link_libraries(abtedge_backend PUBLIC
         abtedge_common
 )
 
+# Flags that are too aggressive for consumers — keep them PRIVATE to ABTEdge
+target_compile_options(abtedge_backend PRIVATE
+        $<$<CONFIG:Release>:
+        -fno-exceptions
+        -fno-rtti
+        -fno-unwind-tables
+        -fno-asynchronous-unwind-tables
+        >
+)
+
 # Platform-specific sources added via target_sources in subdirectory
 add_subdirectory(src/backends)
 
 # =============================================================================
-# Executables
+# Executables (only when building ABTEdge standalone, not as a dependency)
 # =============================================================================
 
-# --- Latency Test (measures register write latency via oscilloscope) ---
-add_executable(latency_test
-        src/test/main.cpp
-        src/test/WRENTester.cpp
-)
+if(PROJECT_IS_TOP_LEVEL)
+    # --- Latency Test (measures register write latency via oscilloscope) ---
+    add_executable(latency_test
+            src/test/main.cpp
+            src/test/WRENTester.cpp
+    )
 
-target_include_directories(latency_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/test
-)
+    target_include_directories(latency_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/test
+    )
 
-target_link_libraries(latency_test PRIVATE
-        abtedge_backend
-)
+    target_link_libraries(latency_test PRIVATE
+            abtedge_backend
+    )
+endif()
 
 # =============================================================================
 # Testing (only for native builds)
@@ -170,28 +181,25 @@ target_link_libraries(latency_test PRIVATE
 #    add_subdirectory(tests)
 #endif()
 
-# =============================================================================
-# Installation
-# =============================================================================
+if(PROJECT_IS_TOP_LEVEL)
+    # =============================================================================
+    # Installation
+    # =============================================================================
 
-include(GNUInstallDirs)
+    include(GNUInstallDirs)
 
-# Install executables (uncomment when they are built)
-# install(TARGETS test_harness fpga_server fpga_client_example
-#         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-# )
+    install(DIRECTORY src/common src/backends
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/abtedge
+            FILES_MATCHING PATTERN "*.hpp"
+    )
 
-install(DIRECTORY src/common src/backends
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/abtedge
-        FILES_MATCHING PATTERN "*.hpp"
-)
+    # =============================================================================
+    # Summary
+    # =============================================================================
 
-# =============================================================================
-# Summary
-# =============================================================================
-
-message(STATUS "")
-message(STATUS "Targets:")
-message(STATUS "  - abtedge_backend     : Backend library (STATIC)")
-message(STATUS "  - latency_test        : Register write latency test")
-message(STATUS "")
+    message(STATUS "")
+    message(STATUS "Targets:")
+    message(STATUS "  - abtedge_backend     : Backend library (STATIC)")
+    message(STATUS "  - latency_test        : Register write latency test")
+    message(STATUS "")
+endif()
