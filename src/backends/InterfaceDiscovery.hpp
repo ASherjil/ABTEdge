@@ -37,6 +37,8 @@ private:
     std::string m_resourcePath{};
     std::size_t m_barSize{};
 
+    bool resolveByBiosIndex(std::string_view ifname);
+    bool readBarSize(int bar);
     bool unbindDriver();
     bool enableBusMaster();
 };
