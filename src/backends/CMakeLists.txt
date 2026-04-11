@@ -4,7 +4,8 @@
 
 target_sources(abtedge_backend PRIVATE
     BackendBase.cpp
-    PCIeBackend.cpp
+    VendorDeviceDiscovery.cpp
+    InterfaceDiscovery.cpp
     HugepageBuffer.cpp
     ../x86_64Tuner.cpp
 )

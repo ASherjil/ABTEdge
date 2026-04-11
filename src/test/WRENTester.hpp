@@ -5,6 +5,7 @@
 #ifndef FPGA_DRIVER_WRENTESTER_HPP
 #define FPGA_DRIVER_WRENTESTER_HPP
 #include "backends/PCIeBackend.hpp"
+#include "backends/VendorDeviceDiscovery.hpp"
 #include <cstdint>
 #include <cstdio>
 
@@ -112,7 +113,7 @@ private:
     bool mbSend(std::uint32_t cmd, const void* data, std::size_t words) ;
     void cleanupCTIMSubscription();
 
-    PCIeBackend m_pcieHandler;
+    PCIeBackend<VendorDeviceDiscovery> m_pcieHandler;
     bool m_connected{};
 };
 

@@ -2,33 +2,60 @@
 // Created by asherjil on 2/1/26.
 //
 
-#ifndef ABTEDGE_PCIEBACKEND_H
-#define ABTEDGE_PCIEBACKEND_H
+#ifndef ABTEDGE_PCIEBACKEND_HPP
+#define ABTEDGE_PCIEBACKEND_HPP
 
 #include "BackendBase.hpp"
 #include "common/BackendConcept.hpp"
-#include <filesystem>
-#include <string_view>
+#include "common/PCIeDiscoveryConcept.hpp"
 
-constexpr std::string_view PCIE_DIRECTORY = "/sys/bus/pci/devices";
+#include <utility>
 
+/// PCIe backend parametrised by a discovery policy.
+///
+/// The policy carries device-specific state and lifecycle hooks:
+///   - VendorDeviceDiscovery : find by vendor/device ID (FPGAs, CPLDs, WRENs)
+///   - InterfaceDiscovery    : find by Linux interface name, unbind driver (NICs)
+///
+/// PCIeBackend itself is a thin shell — all discovery and teardown logic
+/// lives in the policy, keeping the backend zero-cost for policies that
+/// don't need it (e.g. VendorDeviceDiscovery::release() is empty).
+template<PCIeDiscovery Policy>
 class PCIeBackend : public BackendBase {
 public:
-    // Rule of 5 implementation
-    PCIeBackend(std::uint16_t vendorID, std::uint16_t deviceID, int bar);
-    PCIeBackend(const PCIeBackend&) = delete;
-    PCIeBackend(PCIeBackend&& other) noexcept;
-    PCIeBackend& operator=(const PCIeBackend&) = delete;
-    PCIeBackend& operator=(PCIeBackend&& other) noexcept;
+    template<typename... Args>
+    explicit PCIeBackend(Args&&... args)
+        : m_policy(std::forward<Args>(args)...) {}
 
-    [[nodiscard]] bool open();
-	// Future: x86-specific barrier if ever needed
+    PCIeBackend(const PCIeBackend&) = delete;
+    PCIeBackend& operator=(const PCIeBackend&) = delete;
+    PCIeBackend(PCIeBackend&&) noexcept = default;
+
+    PCIeBackend& operator=(PCIeBackend&& other) noexcept {
+        if (this != &other) {
+            BackendBase::close();
+            m_policy.release();
+            BackendBase::operator=(std::move(other));
+            m_policy = std::move(other.m_policy);
+        }
+        return *this;
+    }
+
+    ~PCIeBackend() {
+        BackendBase::close();
+        m_policy.release();
+    }
+
+    [[nodiscard]] bool open() {
+        if (!m_policy.prepare()) return false;
+        return BackendBase::open(m_policy.resourcePath(), 0, m_policy.barSize());
+    }
+
+    Policy&       policy()       noexcept { return m_policy; }
+    const Policy& policy() const noexcept { return m_policy; }
+
 private:
-    std::filesystem::path m_pcieResourcePath{}; // find the BAR of the PCIe device, this is need to open the device
-    std::size_t m_barSize{}; // this is the bar size PCIe resource
+    Policy m_policy;
 };
 
-// must check if the concept is satified
-static_assert(HardwareBus<PCIeBackend>, "PCIeBackend must statify the HardwareBus concept");
-
-#endif //ABTEDGE_PCIEBACKEND_H
+#endif //ABTEDGE_PCIEBACKEND_HPP

@@ -6,6 +6,7 @@
 #define FPGA_DRIVER_TXMC635TESTER_HHP_H
 
 #include "backends/PCIeBackend.hpp"
+#include "backends/VendorDeviceDiscovery.hpp"
 #include <cstdio>
 #include <chrono>
 #include <thread>
@@ -189,8 +190,8 @@ public:
     }
 
 private:
-    PCIeBackend m_fpgaHandler;
-    PCIeBackend m_cpldHandler;
+    PCIeBackend<VendorDeviceDiscovery> m_fpgaHandler;
+    PCIeBackend<VendorDeviceDiscovery> m_cpldHandler;
     bool m_fpgaConnected{};
     bool m_cpldConnected{};
 };
