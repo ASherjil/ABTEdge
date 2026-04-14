@@ -17,7 +17,8 @@
 
 namespace fs = std::filesystem;
 
-InterfaceDiscovery::InterfaceDiscovery(std::string_view ifname, int bar) {
+InterfaceDiscovery::InterfaceDiscovery(std::string_view ifname, int bar,
+                                       std::string_view driverName) {
     std::error_code ec;
 
     // 1. Resolve BDF — try the live interface symlink first
@@ -37,10 +38,20 @@ InterfaceDiscovery::InterfaceDiscovery(std::string_view ifname, int bar) {
         }
     }
 
-    // 2. Resolve driver name from the PCI device directly (works for both paths)
+    // 2. Resolve driver name — sysfs is the source of truth, user hint is fallback
     auto drvLink = fs::read_symlink("/sys/bus/pci/devices/" + m_bdf + "/driver", ec);
     if (!ec) {
-        m_driverName = drvLink.filename().string();
+        std::string resolved = drvLink.filename().string();
+        if (!driverName.empty() && resolved != driverName) {
+            std::fprintf(stderr, "[PCIe] Warning: provided driver '%.*s' does not match "
+                                 "bound driver '%s' — using '%s'\n",
+                         static_cast<int>(driverName.size()), driverName.data(),
+                         resolved.c_str(), resolved.c_str());
+        }
+        m_driverName = std::move(resolved);
+    } else if (!driverName.empty()) {
+        // Driver not bound (unbound from previous run) — use caller-provided name
+        m_driverName = std::string(driverName);
     }
 
     // 3. Read BAR size from resource file
@@ -91,12 +102,21 @@ std::size_t InterfaceDiscovery::barSize() const {
 }
 
 void InterfaceDiscovery::release() {
-    if (m_driverName.empty() || m_bdf.empty()) return;
+    if (m_bdf.empty()) {
+        std::fprintf(stderr, "[PCIe] Warning: release() called with no BDF — device was never resolved\n");
+        return;
+    }
 
-    std::fprintf(stderr, "[PCIe] Driver '%s' was unbound from %s.\n"
-                         "[PCIe] To rebind: echo '%s' > /sys/bus/pci/drivers/%s/bind\n",
-                 m_driverName.c_str(), m_bdf.c_str(),
-                 m_bdf.c_str(), m_driverName.c_str());
+    if (!m_driverName.empty()) {
+        std::fprintf(stderr, "[PCIe] Driver '%s' was unbound from %s.\n"
+                             "[PCIe] To rebind: echo '%s' > /sys/bus/pci/drivers/%s/bind\n",
+                     m_driverName.c_str(), m_bdf.c_str(),
+                     m_bdf.c_str(), m_driverName.c_str());
+    } else {
+        std::fprintf(stderr, "[PCIe] Device %s has no known driver.\n"
+                             "[PCIe] Pass the driver name to InterfaceDiscovery for rebind instructions.\n",
+                     m_bdf.c_str());
+    }
 }
 
 std::string_view InterfaceDiscovery::bdf() const {

@@ -15,7 +15,8 @@
 class InterfaceDiscovery {
 public:
     // Rule of 5: move-only
-    explicit InterfaceDiscovery(std::string_view ifname, int bar = 0);
+    explicit InterfaceDiscovery(std::string_view ifname, int bar = 0,
+                               std::string_view driverName = {});
     InterfaceDiscovery(const InterfaceDiscovery&) = delete;
     InterfaceDiscovery& operator=(const InterfaceDiscovery&) = delete;
     InterfaceDiscovery(InterfaceDiscovery&& other) noexcept;
