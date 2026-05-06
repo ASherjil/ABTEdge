@@ -31,12 +31,12 @@ static_assert(std::is_trivially_copyable_v<TestPayload>);
 static_assert(sizeof(TestPayload) == 16);
 
 // Cache-line-aligned slot with atomic sequence counter for seqlock protocol
-struct alignas(64) TestSlot {
+struct alignas(CACHE_LINE_SIZE) TestSlot {
     std::atomic<std::uint64_t> seq;
     TestPayload                payload;
 };
-static_assert(sizeof(TestSlot) == 64);
-static_assert(alignof(TestSlot) == 64);
+static_assert(sizeof(TestSlot) >= CACHE_LINE_SIZE);
+static_assert(alignof(TestSlot) == CACHE_LINE_SIZE);
 
 constexpr const char* TEST_SHM_NAME = "/abtedge_shm_test";
 
