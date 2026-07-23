@@ -1,6 +1,6 @@
-# ABTEdge (Accelerator Beam Transfer Encore Driver GEnerator)
+# ABTEdge
 
-Ultra-low latency, kernel-bypass C++20 library for direct hardware register access over **PCIe** and **AXI** buses on Linux — plus the **DMA building blocks** (physically contiguous hugepage memory and typed descriptor rings) needed to build complete userspace device drivers on top of it.
+Low latency, kernel-bypass C++20 library for direct hardware register access over **PCIe** and **AXI** buses on Linux — plus the **DMA building blocks** (physically contiguous hugepage memory and typed descriptor rings) needed to build complete userspace device drivers on top of it.
 
 No kernel drivers. No `ioctl` overhead. No bloated abstractions. Just `mmap` straight into hardware and pointer dereferences that compile down to single CPU load/store instructions.
 
@@ -252,7 +252,7 @@ Every DMA-capable device is driven with the same five steps, MMIO and DMA interl
 
 ## Real-world example: a userspace NIC driver in one header
 
-The ABTRDA3 low-latency benchmarking suite contains a complete, from-scratch userspace driver for the **Intel I210 gigabit NIC** built entirely on ABTEdge — `src/backends/IGBCustomPMD/Intel_I210.hpp`. It is the best reference for how the pieces compose:
+The ABTRDA3 low-latency benchmarking suite contains a complete, from-scratch userspace driver for the **Intel I210 gigabit NIC** built entirely on ABTEdge. It is the best reference for how the pieces compose:
 
 | ABTEdge component | What the I210 driver uses it for |
 |---|---|
@@ -262,6 +262,8 @@ The ABTRDA3 low-latency benchmarking suite contains a complete, from-scratch use
 | `InterfaceDiscovery` | resolves a Linux interface name to the PCI device behind it |
 
 The register map (`I210Registers.hpp`) was written from the Intel I210 datasheet (document 333016) — demonstrating that a clean-room register header plus ABTEdge is all a userspace PMD needs: no kernel driver, no vendor SDK, and round-trip latencies far below the kernel network stack on identical hardware.
+
+See: https://github.com/ASherjil/ABTRDA3/tree/master
 
 The same pattern ported to an AXI device is the FPGA/SoC story: swap `PCIeBackend` for `AXIBackend`, keep everything else.
 
