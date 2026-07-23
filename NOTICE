@@ -1,0 +1,5 @@
+ABTEdge
+Copyright 2026 Areeb Sherjil
+
+This product includes a CMake test configuration snippet from CERN
+(home.cern), licensed under the Zlib license (src/test/CMakeLists.txt).

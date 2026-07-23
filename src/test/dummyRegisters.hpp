@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Areeb Sherjil
 #ifndef FPGA_DUMMY_HW_DESC_REGISTERS_HPP
 #define FPGA_DUMMY_HW_DESC_REGISTERS_HPP
 

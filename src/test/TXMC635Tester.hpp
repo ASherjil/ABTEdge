@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Areeb Sherjil
 //
 // Created by asherjil on 2/6/26.
 //

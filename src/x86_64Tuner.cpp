@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Areeb Sherjil
 #include "x86_64Tuner.hpp"
 
 #ifdef ABTEDGE_ARCH_X86_64

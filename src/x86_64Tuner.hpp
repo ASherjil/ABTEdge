@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Areeb Sherjil
 #ifndef FPGA_DRIVER_X86_64TUNER_HPP
 #define FPGA_DRIVER_X86_64TUNER_HPP
 
