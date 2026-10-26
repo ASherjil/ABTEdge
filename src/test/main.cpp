@@ -9,6 +9,7 @@
 #include "WRENTester.hpp"
 #include "x86_64Tuner.hpp"
 #include "ShmTester.hpp"
+#include "SeqLockTester.hpp"
 
 
 #include <cstdio>
@@ -39,6 +40,10 @@ int main() {
     // Shared memory test — runs on any platform (uses /dev/shm, no hardware needed)
     ShmTester shmTester;
     shmTester.runWriteReadTest();
+
+    // SeqLock tests — short run; the full run is the seqlock_test executable
+    SeqLockTester seqLockTester;
+    seqLockTester.runAll(100'000, 2);
 
 #ifdef ABTEDGE_ARCH_AARCH64
     AXIBusTester diotTester;

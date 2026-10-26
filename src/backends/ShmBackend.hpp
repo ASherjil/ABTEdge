@@ -17,14 +17,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <utility>
+#include "common/CacheLine.hpp"
 
-#ifdef __cpp_lib_hardware_interference_size
-    constexpr std::size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
-#else
-    constexpr std::size_t CACHE_LINE_SIZE = 64;
-#endif
-
-template<typename T>
+template <typename T>
 concept ShmSlot = std::is_trivially_copyable_v<T> && (alignof(T) & (CACHE_LINE_SIZE - 1)) == 0;
 
 enum class ShmMode {

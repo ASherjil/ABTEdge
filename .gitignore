@@ -9,3 +9,6 @@ cmake-build-*/
 CMakeCache.txt
 CMakeFiles/
 compile_commands.json
+
+# Erik Rigtorp reference clone, study material only, not part of ABTEdge
+Seqlock/

@@ -170,6 +170,22 @@ if(PROJECT_IS_TOP_LEVEL)
     target_link_libraries(latency_test PRIVATE
             abtedge_backend
     )
+
+    # --- SeqLock test (T1..T5 of docs/SEQLOCK_REQUIREMENTS.md, no hardware needed) ---
+    find_package(Threads REQUIRED)
+
+    add_executable(seqlock_test
+            src/test/seqlock_main.cpp
+    )
+
+    target_include_directories(seqlock_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/test
+    )
+
+    target_link_libraries(seqlock_test PRIVATE
+            abtedge_backend
+            Threads::Threads
+    )
 endif()
 
 # =============================================================================
@@ -203,5 +219,6 @@ if(PROJECT_IS_TOP_LEVEL)
     message(STATUS "Targets:")
     message(STATUS "  - abtedge_backend     : Backend library (STATIC)")
     message(STATUS "  - latency_test        : Register write latency test")
+    message(STATUS "  - seqlock_test        : SeqLock correctness tests")
     message(STATUS "")
 endif()

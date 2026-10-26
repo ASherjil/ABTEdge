@@ -71,6 +71,38 @@
         "CMAKE_BUILD_TYPE": "Release",
         "ABTEDGE_ARCH": "SIMULATED"
       }
+    },
+    {
+      "name": "deb13x64-release",
+      "displayName": "x86_64 Release, Debian 13 CDK (deb13x64)",
+      "inherits": "x86_64-release",
+      "cacheVariables": {
+        "CDK_DEBIAN_VERSION": "13"
+      }
+    },
+    {
+      "name": "deb13x64-debug",
+      "displayName": "x86_64 Debug, Debian 13 CDK (deb13x64)",
+      "inherits": "x86_64-debug",
+      "cacheVariables": {
+        "CDK_DEBIAN_VERSION": "13"
+      }
+    },
+    {
+      "name": "deb13a64-release",
+      "displayName": "ARM64 Release, Debian 13 CDK (deb13a64)",
+      "inherits": "arm64-release",
+      "cacheVariables": {
+        "CDK_DEBIAN_VERSION": "13"
+      }
+    },
+    {
+      "name": "deb13a64-debug",
+      "displayName": "ARM64 Debug, Debian 13 CDK (deb13a64)",
+      "inherits": "arm64-debug",
+      "cacheVariables": {
+        "CDK_DEBIAN_VERSION": "13"
+      }
     }
   ],
   "buildPresets": [
@@ -97,6 +129,22 @@
     {
       "name": "native-release",
       "configurePreset": "native-release"
+    },
+    {
+      "name": "deb13x64-release",
+      "configurePreset": "deb13x64-release"
+    },
+    {
+      "name": "deb13x64-debug",
+      "configurePreset": "deb13x64-debug"
+    },
+    {
+      "name": "deb13a64-release",
+      "configurePreset": "deb13a64-release"
+    },
+    {
+      "name": "deb13a64-debug",
+      "configurePreset": "deb13a64-debug"
     }
   ],
   "testPresets": [
